@@ -1,4 +1,56 @@
 feature,area,priority,original,clone,notes
+Sign up and log in with phone or email OTP plus Apple and Google,onboarding,must,yes,no,S01
+Birth date at sign up with under-13 refusal and minor account defaults,onboarding,must,yes,no,S01; original 12+ rating
+Interest picker for new users (skippable),onboarding,should,yes,no,S02; source 6
+For You feed: full-screen vertical autoplay with swipe,feed,must,yes,no,S03
+Following feed tab,feed,must,yes,no,S03
+Friends feed tab,feed,could,yes,no,S03
+Right action rail: like comment save share follow,feed,must,yes,no,S03
+Caption with clickable hashtags and mentions,feed,must,yes,no,S03
+Not interested / hide creator / hide sound from long-press sheet,feed,must,yes,no,S04; source 6
+Refresh For You feed and keyword filters for feed,feed,should,yes,no,S20
+Avoid two videos in a row from same creator or sound,feed,should,yes,no,source 6
+Opt-in warning screen and context labels on sensitive videos,feed,should,yes,no,source 2
+AI-generated label shown on video,feed,must,yes,no,source 12 is_aigc
+Paid partnership label,feed,could,yes,no,source 12 brand toggles
+Search: top videos users hashtags,search,should,yes,no,S07 minimal
+Record 15s/60s/3m/10m with multi-clip and upload from gallery,posting,must,yes,no,S08
+Editor: trim text stickers basic filters voiceover,posting,must,yes,no,S09
+Auto captions,posting,should,yes,no,S09
+Caption up to 2200 chars with hashtags and mentions,posting,must,yes,no,S10; source 12
+Privacy level: everyone / friends / followers / only me,posting,must,yes,no,S10; source 12
+Allow or disable comments per post,posting,must,yes,no,S10
+Cover frame picker,posting,should,yes,no,S10 video_cover_timestamp_ms
+Creator self-label AI-generated content,posting,must,yes,no,S10
+Commercial disclosure toggles,posting,could,yes,no,S10
+Save as draft and drafts tab,posting,must,yes,no,S10 S12
+Upload progress with processing and under-review states,posting,must,yes,no,S11
+Post-publish states: published removed failed with reason,posting,must,yes,no,S11
+Profile with video grid private tab liked and saved,profile,must,yes,no,S12
+Comments sheet with threaded replies and likes,comments,must,yes,no,S05; source 11
+Mention and hashtag in comments,comments,should,yes,no,S05
+Owner: pin delete reply to comment,comments,must,yes,no,S05
+Who can comment: everyone friends no one,comments,must,yes,no,S19; source 8
+Filter all comments (approve before visible),comments,should,yes,no,S19; source 8 says not available to everyone in original
+Keyword comment filter with review and approve or delete,comments,must,yes,no,S19; source 8
+Report video comment or account with reason and sub-reason,reporting,must,yes,no,S14; taxonomy from source 2
+Block user from report confirmation,reporting,should,yes,no,S14
+Report records page with status per report,reporting,must,yes,no,S17; source 7
+Inbox updates on report progress,reporting,must,partial,no,S13; original says it 'may' update
+Request another review of a report outcome,reporting,should,partial,no,S17; original limited regions
+Automated first-pass moderation then human review queue,moderation,must,yes,no,source 3 and 13
+Extra review when a video gains reach or is reported,moderation,should,yes,no,source 3
+Moderation actions: remove / FYF-ineligible / age-restrict / warning screen / context label,moderation,must,yes,no,source 2 and 3
+Strikes per feature and per policy expiring after 90 days,moderation,must,yes,no,source 5
+Immediate permanent ban for severe violations,moderation,must,yes,no,source 5
+Warning notification before permanent ban,moderation,must,yes,no,source 5
+Account status page listing violations strikes and expiry,moderation,must,yes,no,S16; source 5
+Removal notice with policy named and appeal button,appeals,must,yes,no,S18; source 3
+Appeal form and appeal status tracking,appeals,must,yes,no,S18 S16
+Notify creator when video is FYF-ineligible (original: analytics only),appeals,should,partial,no,source 4
+Activity notifications: likes comments mentions follows,inbox,must,yes,no,S13
+System notifications: removal strike appeal update report update,inbox,must,yes,no,S13
+Arabic UI and RTL throughout,platform,must,yes,no,original ships AR
 Every removal shows the exact rule and the offending segment with Arabic explanation,moderation,must,no,no,fix 1; evidence: 49 store reviews on wrongful takedowns
 Human appeal with in-app ticket and published SLA,moderation,must,no,no,fix 2; evidence: 17 appeals/support reviews
 Report outcome explained with second-level escalation,moderation,must,no,no,fix 3; evidence: 24 reports-ignored reviews
@@ -9,6 +61,7 @@ App under 150 MB and runs on iPad and older iOS,platform,should,no,no,fix 6; ori
 Declared ad frequency cap,feed,should,no,no,fix 7; app-store-ae #14229717781
 AI-generated content label and hide-AI toggle,feed,should,no,no,fix 7; app-store-us #14742398772
 Arabic-speaking moderators and per-region enforcement stats,moderation,should,no,no,fix 8; evidence: 42 Saudi-bias reviews plus SA storefront 3.67 rating
+Account status and report records reachable in 2 taps from inbox,moderation,should,no,no,recon: original needs 5-6 taps
 Bulk delete messages,messaging,could,no,no,app-store-ae #14214821101
 Bulk unfollow inactive accounts by last-post date,social,could,no,no,app-store-ae #14251035069
 Clear all reposts at once,profile,could,no,no,app-store-ae #14191051741
@@ -16,3 +69,12 @@ Stickers in comments,comments,could,partial,no,app-store-ae #14183121083
 Per-image duration in photo-to-video editor,editor,could,partial,no,app-store-us #14742971233
 Picture in picture playback,player,could,partial,no,app-store-us #14738221580
 Forward a comment to DMs,comments,could,partial,no,app-store-us #14738698677
+Licensed music and sound library,sounds,skip,yes,no,licensed catalogue; original user audio only in v1
+Effects and AR filter library,posting,skip,yes,no,proprietary assets
+Duet and Stitch,posting,skip,yes,no,derivative content; deferred
+LIVE streaming gifts and coins,live,skip,yes,no,out of slice; payments and realtime moderation
+TikTok Shop,commerce,skip,yes,no,out of slice
+Creator Rewards and monetization,creator,skip,yes,no,out of slice
+Direct messages,messaging,skip,yes,no,out of slice; separate abuse surface
+Recommendation system at original scale,feed,skip,yes,no,start simple: interests + popularity + recency + completion
+Legal reporting to child-safety authorities,moderation,skip,yes,no,use a specialised provider not custom code
