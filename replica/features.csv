@@ -1,0 +1,18 @@
+feature,area,priority,original,clone,notes
+Every removal shows the exact rule and the offending segment with Arabic explanation,moderation,must,no,no,fix 1; evidence: 49 store reviews on wrongful takedowns
+Human appeal with in-app ticket and published SLA,moderation,must,no,no,fix 2; evidence: 17 appeals/support reviews
+Report outcome explained with second-level escalation,moderation,must,no,no,fix 3; evidence: 24 reports-ignored reviews
+Report impersonation for any person not only celebrities,moderation,should,no,no,fix 3; app-store-us #14743409957
+Age verification path that never dead-ends (ID or parent),onboarding,must,no,no,fix 4; evidence: 10 reviews (thin)
+Same feature set for every user and in-app changelog,release,should,no,no,fix 5; evidence: 106 rollout reviews (one-week burst)
+App under 150 MB and runs on iPad and older iOS,platform,should,no,no,fix 6; original is 1080 MB minOS 15
+Declared ad frequency cap,feed,should,no,no,fix 7; app-store-ae #14229717781
+AI-generated content label and hide-AI toggle,feed,should,no,no,fix 7; app-store-us #14742398772
+Arabic-speaking moderators and per-region enforcement stats,moderation,should,no,no,fix 8; evidence: 42 Saudi-bias reviews plus SA storefront 3.67 rating
+Bulk delete messages,messaging,could,no,no,app-store-ae #14214821101
+Bulk unfollow inactive accounts by last-post date,social,could,no,no,app-store-ae #14251035069
+Clear all reposts at once,profile,could,no,no,app-store-ae #14191051741
+Stickers in comments,comments,could,partial,no,app-store-ae #14183121083
+Per-image duration in photo-to-video editor,editor,could,partial,no,app-store-us #14742971233
+Picture in picture playback,player,could,partial,no,app-store-us #14738221580
+Forward a comment to DMs,comments,could,partial,no,app-store-us #14738698677
