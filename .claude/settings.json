@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "trader-skill": {
+      "source": {
+        "source": "github",
+        "repo": "Jakeschincariol/trader-skill"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "trader-skill@trader-skill": true
+  }
+}
