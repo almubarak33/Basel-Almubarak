@@ -27,6 +27,7 @@ const string G_SET  = "② Entry setups"
 const string G_RISK = "③ Stop & targets"
 const string G_VIS  = "④ Trade drawing"
 const string G_STR  = "⑤ Trend, channel & zones"
+const string G_SES  = "⑤b Market sessions (display only)"
 const string G_PNL  = "⑥ Performance panel"
 const string G_SIZE = "⑦ Cost & position sizing"
 
@@ -134,6 +135,17 @@ zoneCount   = input.int(3, "per side", minval = 1, maxval = 10, group = G_STR, i
 bullCol     = input.color(#00c08b, "Bull", group = G_STR, inline = "col")
 bearCol     = input.color(#ff4d6d, "Bear", group = G_STR, inline = "col")
 neutCol     = input.color(#8a8f98, "Neutral", group = G_STR, inline = "col")
+
+showSesBox  = input.bool(true, "Session boxes: Asia / London / New York", group = G_SES, tooltip = "Display only: the boxes mark each session's high and low and never change signals or statistics. Each session uses its own city's clock, so daylight-saving changes are handled. Shown on charts of 1H and below.")
+sesDays     = input.int(5, "Keep last N days", minval = 1, maxval = 30, group = G_SES)
+asiaSesIn   = input.session("0900-1800", "Asia (Tokyo time)", group = G_SES, inline = "as")
+asiaCol     = input.color(#9c27b0, "", group = G_SES, inline = "as")
+ldnSesIn    = input.session("0800-1700", "London (London time)", group = G_SES, inline = "ld")
+ldnCol      = input.color(#2962ff, "", group = G_SES, inline = "ld")
+nySesIn     = input.session("0800-1700", "New York (New York time)", group = G_SES, inline = "ny")
+nyCol       = input.color(#ff9800, "", group = G_SES, inline = "ny")
+sesFill     = input.int(90, "Box transparency", minval = 50, maxval = 100, group = G_SES)
+showAsiaLv  = input.bool(true, "Extend the Asian high / low until the New York close", group = G_SES)
 
 showPanel   = input.bool(true, "Show performance panel", group = G_PNL)
 showSetRows = input.bool(false, "Per-setup scoreboard rows", group = G_PNL)
@@ -1006,6 +1018,66 @@ if showTl and barstate.islast
         tlRes := line.new(ph2x, ph2y, ph1x, ph1y, color = ph1y < ph2y ? bearCol : bullCol, width = 1, extend = extend.right)
     if not na(pl2x) and bar_index - pl2x < 9900
         tlSup := line.new(pl2x, pl2y, pl1x, pl1y, color = pl1y > pl2y ? bullCol : bearCol, width = 1, extend = extend.right)
+
+// ───────────────────────────── Market sessions (display only) ─────────────────────────────
+// Session boxes never feed the signal engine; they only help read the chart.
+type SesBox
+    box   bx
+    float hi
+    float lo
+    int   startBar
+    bool  active = false
+
+bool sesChart = timeframe.isintraday and timeframe.in_seconds() <= 3600
+bool inAsia = not na(time(timeframe.period, asiaSesIn, "Asia/Tokyo"))
+bool inLdn  = not na(time(timeframe.period, ldnSesIn, "Europe/London"))
+bool inNy   = not na(time(timeframe.period, nySesIn, "America/New_York"))
+var SesBox sbAsia = SesBox.new()
+var SesBox sbLdn  = SesBox.new()
+var SesBox sbNy   = SesBox.new()
+var array<box>  sesBoxes = array.new<box>()
+var array<line> asiaLines = array.new<line>()
+var line asiaHiLn = na
+var line asiaLoLn = na
+var bool asiaLvLive = false
+
+sesStep(SesBox sb, bool inS, string name, color col) =>
+    if inS and not sb.active
+        sb.hi := high
+        sb.lo := low
+        sb.startBar := bar_index
+        sb.bx := box.new(bar_index, high, bar_index, low, border_color = color.new(col, 45), border_width = 1, bgcolor = color.new(col, sesFill), text = name, text_size = size.tiny, text_color = color.new(col, 20), text_halign = text.align_left, text_valign = text.align_top)
+        sesBoxes.push(sb.bx)
+        while sesBoxes.size() > 3 * sesDays
+            box.delete(sesBoxes.shift())
+    else if inS and sb.active
+        sb.hi := math.max(sb.hi, high)
+        sb.lo := math.min(sb.lo, low)
+        sb.bx.set_top(sb.hi)
+        sb.bx.set_bottom(sb.lo)
+        sb.bx.set_right(bar_index)
+    bool ended = sb.active and not inS
+    sb.active := inS
+    ended
+
+if showSesBox and sesChart
+    bool asiaEnded = sesStep(sbAsia, inAsia, "Asia", asiaCol)
+    sesStep(sbLdn, inLdn, "London", ldnCol)
+    bool nyEnded = sesStep(sbNy, inNy, "New York", nyCol)
+    if showAsiaLv
+        if asiaEnded
+            asiaHiLn := line.new(sbAsia.startBar, sbAsia.hi, bar_index, sbAsia.hi, color = color.new(asiaCol, 25), style = line.style_dotted, width = 1)
+            asiaLoLn := line.new(sbAsia.startBar, sbAsia.lo, bar_index, sbAsia.lo, color = color.new(asiaCol, 25), style = line.style_dotted, width = 1)
+            asiaLines.push(asiaHiLn)
+            asiaLines.push(asiaLoLn)
+            while asiaLines.size() > 2 * sesDays
+                line.delete(asiaLines.shift())
+            asiaLvLive := true
+        else if asiaLvLive
+            asiaHiLn.set_x2(bar_index)
+            asiaLoLn.set_x2(bar_index)
+        if nyEnded or (inAsia and not asiaEnded and sbAsia.startBar == bar_index)
+            asiaLvLive := false
 
 // ───────────────────────────── Performance panel ─────────────────────────────
 panelPosition() =>
