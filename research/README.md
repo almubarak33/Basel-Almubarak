@@ -11,6 +11,7 @@ Python mirror of `indicators/APEX_Fusion_Pro.pine`, used to design and test the 
 | `final_config.py` | the frozen Fusion configuration |
 | `validate.py` | out-of-sample, cross-timeframe and cross-asset validation → `results/validation.csv` |
 | `report_tables.py` | cost sensitivity, monthly, per-setup, 4H tables → `results/` |
+| `htf_align_check.py` | sensitivity to the 4H bar anchor (17:00 vs 18:00 New York) |
 
 ```bash
 pip install pandas numpy

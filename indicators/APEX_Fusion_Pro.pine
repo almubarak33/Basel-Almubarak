@@ -151,7 +151,9 @@ fmt(float v) => str.tostring(v, format.mintick)
 fmtR(float v) => (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + "R"
 pct(float v) => str.tostring(v * 100, "#.#") + "%"
 
-bool isCryptoSym = syminfo.type == "crypto"
+// Gold/silver tokens and perpetuals (XAUUSDT, PAXG, XAUT, XAGUSDT) are metals for cost, session and opening range.
+bool isMetalTicker = str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "PAXG") or str.contains(syminfo.ticker, "GOLD") or str.contains(syminfo.ticker, "SILVER")
+bool isCryptoSym = syminfo.type == "crypto" and not isMetalTicker
 bool isStockSym = syminfo.type == "stock" or syminfo.type == "fund" or syminfo.type == "dr" or syminfo.type == "index"
 string assetClass = assetIn == "Auto" ? (isCryptoSym ? "crypto" : isStockSym ? "stock" : "metal") : assetIn == "Crypto" ? "crypto" : assetIn == "Stocks / Indices" ? "stock" : "metal"
 
@@ -192,7 +194,15 @@ ema200     = ta.ema(close, 200)
 rsi14      = ta.rsi(close, 14)
 float volMa = ta.sma(volume, 20)
 bool volOk = volMult <= 0 or na(volume) or na(volMa) or volume >= volMa * volMult
-float vwapV = ta.vwap(hlc3)
+// Session VWAP built by hand: ta.vwap can stop the script on symbols whose vendor provides no volume.
+var float vwCpv = 0.0
+var float vwCv = 0.0
+if timeframe.change("D")
+    vwCpv := 0.0
+    vwCv := 0.0
+vwCpv += hlc3 * nz(volume)
+vwCv += nz(volume)
+float vwapV = vwCv > 0 ? vwCpv / vwCv : na
 bool bullBar = close > open
 bool bearBar = close < open
 bool ready = not na(atr) and atr > 0
@@ -782,7 +792,6 @@ if barstate.islast
         label.delete(liveLevelLabels.pop())
     if showLive and not na(cur)
         int xr = bar_index + projBars + 2
-        bool isL = cur.dir == 1
         float tolerance = math.max(syminfo.mintick, 0.3 * atr)
         addLevelLabel(liveLevelLabels, xr, cur.entry, "ENTRY " + fmt(cur.entry), entryCol, tolerance)
         addLevelLabel(liveLevelLabels, xr, cur.sl, (cur.sl == cur.sl0 ? "SL " : cur.sl == cur.entry ? "SL (BE) " : "SL (TRAIL) ") + fmt(cur.sl), slCol, tolerance)

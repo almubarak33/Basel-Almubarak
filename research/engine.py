@@ -221,8 +221,12 @@ def vwap_session(df, src, day_id):
     return out
 
 
-def htf_bucket(df, htf_minutes: int, start_hour: int = 18) -> np.ndarray:
+HTF_START_HOUR = 18  # New York hour where HTF (4H/D) bars are anchored; OANDA-style feeds use 17
+
+
+def htf_bucket(df, htf_minutes: int, start_hour: int = None) -> np.ndarray:
     """HTF bar id aligned to the session start (as TradingView aligns 4H/1D bars)."""
+    start_hour = HTF_START_HOUR if start_hour is None else start_hour
     shifted = df["ny"] - pd.Timedelta(hours=start_hour)
     day = (shifted.dt.year * 10000 + shifted.dt.month * 100 + shifted.dt.day).to_numpy().astype(np.int64)
     if htf_minutes >= 43200:   # monthly
