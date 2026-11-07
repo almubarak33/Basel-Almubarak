@@ -1,0 +1,53 @@
+# ══════════════════════════════════════════════════════════
+#  Pro Scalping Bot – Config
+#  كل قيمة تقدر تجاوزها من Railway → Variables
+# ══════════════════════════════════════════════════════════
+
+# ── Risk Management ───────────────────────────────────────
+leverage:          10      # الرافعة المالية
+risk_pct:          0.01    # 1% من الرصيد لكل صفقة
+max_daily_loss:    0.05    # إيقاف البوت عند -5% يومياً
+max_consec_losses: 3       # تخفيض الحجم بعد 3 خسائر متتالية
+max_positions:     5       # أقصى صفقات مفتوحة بنفس الوقت
+min_rr:            1.8     # أدنى نسبة مكافأة:مخاطرة مقبولة
+
+# ── Strategy ──────────────────────────────────────────────
+sl_atr_mult: 1.5           # Stop Loss = 1.5 × ATR
+tp_atr_mult: 3.0           # Take Profit = 3.0 × ATR (1:2)
+vol_min:     1.2           # حجم تداول أعلى من المتوسط بـ 20%
+
+# ── Bot ───────────────────────────────────────────────────
+loop_seconds: 60           # فحص كل 60 ثانية (مناسب لـ 30 زوج)
+
+# ── Top 30 Pairs by Futures Volume ────────────────────────
+symbols:
+  - { symbol: "BTC/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "ETH/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "SOL/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "BNB/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "XRP/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "DOGE/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "ADA/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "AVAX/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "LINK/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "DOT/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "LTC/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "UNI/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "NEAR/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "ARB/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "OP/USDT:USDT",   timeframe: "5m", limit: 150 }
+  - { symbol: "SUI/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "APT/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "INJ/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "TIA/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "FIL/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "ATOM/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "FET/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "JUP/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "PYTH/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "WIF/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "PEPE/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "SHIB/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "TRB/USDT:USDT",  timeframe: "5m", limit: 150 }
+  - { symbol: "AAVE/USDT:USDT", timeframe: "5m", limit: 150 }
+  - { symbol: "MKR/USDT:USDT",  timeframe: "5m", limit: 150 }
