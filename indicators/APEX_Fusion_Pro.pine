@@ -15,8 +15,8 @@
 // Non-repainting: entries are evaluated on confirmed bars only; HTF / anchor data use the previous
 // completed bar (expression[1] + lookahead_on). Pivots, zones and trendlines are drawn back at the
 // pivot bar once confirmed; the regression channel is recalculated on the last bar.
-// The performance panel is an OHLC simulation (entry at the signal close, stop-first when a bar
-// touches both stop and target, round-trip cost subtracted). It is not broker execution.
+// The performance panel is an OHLC simulation (entry at the signal close, or at the limit fill below
+// 1H; stop-first when a bar touches both stop and target; round-trip cost subtracted). Not broker execution.
 //@version=6
 indicator("APEX Fusion Pro", shorttitle = "APEX FUSION", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500, max_bars_back = 1000)
 
@@ -42,7 +42,7 @@ lang        = input.string("العربية", "Language / اللغة", options = 
 assetIn     = input.string("Auto", "Asset class", options = ["Auto", "Metals / FX / Commodities", "Crypto", "Stocks / Indices"], group = G_SIG, tooltip = "Auto reads syminfo.type. It sets the round-trip cost, the active-session filter (off for crypto) and the opening-range session.")
 minScore    = input.int(5, "Minimum APEX confluence score (0-7)", minval = 0, maxval = 7, group = G_SIG, tooltip = "Counts aligned conditions: HTF trend, EMA200 side, EMA21/55 order, ADX threshold, ADX rising, DI alignment, RSI side. Applies to trend setups. It is not a win probability.")
 useAnchor   = input.bool(true, "Anchor trend must agree (Daily on intraday charts)", group = G_SIG, tooltip = "The strongest filter in the gold tests: signals against or without a Daily trend lost money.")
-useHtfGate  = input.bool(true, "HTF trend must agree (4H on 15m / 1H)", group = G_SIG)
+useHtfGate  = input.bool(true, "HTF trend must agree (4H on 5m / 15m / 1H)", group = G_SIG)
 sessIn      = input.string("Auto", "Active-session filter", options = ["Auto", "On", "Off"], group = G_SIG, inline = "ss", tooltip = "Auto: on for metals, FX, commodities and stocks; off for crypto. Applies to charts below 4H. Gold signals between 00:00 and 05:00 New York lost money in all three test feeds.")
 sessStr     = input.session("0800-1700", "", group = G_SIG, inline = "ss")
 sessTz      = input.string("America/New_York", "Session timezone", group = G_SIG)
@@ -170,7 +170,7 @@ string assetClass = assetIn == "Auto" ? (isCryptoSym ? "crypto" : isStockSym ? "
 
 autoHtf() =>
     int s = timeframe.in_seconds()
-    s <= 3600 ? "240" : s <= 14400 ? "D" : s <= 86400 ? "W" : "M"
+    s <= 300 and not ltfPack ? "60" : s <= 3600 ? "240" : s <= 14400 ? "D" : s <= 86400 ? "W" : "M"
 autoAnchor() =>
     int s = timeframe.in_seconds()
     s <= 3600 ? "D" : s <= 14400 ? "W" : "M"
@@ -463,7 +463,7 @@ float slDistL = math.min(math.max(close - (ta.lowest(low, swingLook) - slBuf * a
 float slDistS = math.min(math.max((ta.highest(high, swingLook) + slBuf * atr) - close, slMinAtr * atr), slMaxAtr * atr)
 
 bool hiCostMetal = str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "SILVER") or str.contains(syminfo.ticker, "XPT") or str.contains(syminfo.ticker, "XCU")
-bool isGold = str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "PAXG") or str.contains(syminfo.ticker, "GOLD") or syminfo.root == "GC" or syminfo.root == "MGC"
+bool isGold = assetClass == "metal" and (str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "PAXG") or str.contains(syminfo.ticker, "GOLD") or syminfo.root == "GC" or syminfo.root == "MGC")
 float costPct = costMode == "Auto" ? (assetClass == "crypto" ? 0.10 : hiCostMetal ? 0.06 : isGold ? 0.01 : 0.03) : costCustom
 bool smallTf = timeframe.in_seconds() < 3600
 float cgMinDist = costPct / 100 * close / (cgMaxPct / 100)
@@ -481,7 +481,7 @@ float chandL1 = chandL[1]
 float chandS1 = chandS[1]
 
 // Management profile
-string profile = profileIn == PROF_AUTO ? (timeframe.in_seconds() >= 3600 ? PROF_HW : PROF_MW) : profileIn
+string profile = profileIn == PROF_AUTO ? (timeframe.in_seconds() >= 3600 ? PROF_HW : ltfPack ? PROF_MW : PROF_BAL) : profileIn
 float k1 = profile == PROF_MW ? 0.4 : profile == PROF_BAL ? 1.0 : profile == PROF_HW ? 0.5 : profile == PROF_HP ? 0.3 : profile == PROF_RUN ? 1.0 : cTp1
 float k2 = profile == PROF_MW ? 1.5 : profile == PROF_BAL ? 3.0 : profile == PROF_HW ? 2.0 : profile == PROF_HP ? 1.5 : profile == PROF_RUN ? 2.0 : cTp2
 float k3 = profile == PROF_MW ? 4.0 : profile == PROF_BAL ? 5.0 : profile == PROF_HW ? 5.0 : profile == PROF_HP ? 4.0 : profile == PROF_RUN ? 8.0 : cTp3
@@ -811,9 +811,14 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
 
 // 1b) Pending pullback limit order: fill, expire, or cancel (only while flat).
 bool evFill = false
+bool evCancel = false
+float fillPx = na
+float fillSl = na
+int fillDir = 0
 if barstate.isconfirmed and not na(pend)
     if not na(cur)
         cancelPending(pend)
+        evCancel := true
         pend := na
     else if bar_index > pend.bar
         int pdir = pend.dir
@@ -821,6 +826,7 @@ if barstate.isconfirmed and not na(pend)
         bool invalid = pdir == 1 ? open <= pend.stop : open >= pend.stop
         if expired or invalid
             cancelPending(pend)
+            evCancel := true
             pend := na
         else if (pdir == 1 ? low <= pend.limit : high >= pend.limit)
             float fill = pdir == 1 ? math.min(open, pend.limit) : math.max(open, pend.limit)
@@ -828,6 +834,9 @@ if barstate.isconfirmed and not na(pend)
                 line.delete(pend.ln)
                 cur := openTradeAt(pdir, pend.setup, pend.score, fill, pend.stop, pend.bar, pend.lb)
                 evFill := true
+                fillPx := fill
+                fillSl := pend.stop
+                fillDir := pdir
                 // Unknown order inside the fill bar: if it also reached the stop, count the stop.
                 if (pdir == 1 ? low <= cur.sl : high >= cur.sl)
                     lastR := closeTrade(cur, cur.sl, "SL")
@@ -835,6 +844,7 @@ if barstate.isconfirmed and not na(pend)
                     cur := na
             else
                 cancelPending(pend)
+                evCancel := true
             pend := na
 
 // 2) New signals on bar close (an opposite signal reverses an open trade when enabled).
@@ -848,6 +858,7 @@ if longSig and (na(cur) or (reverseOn and cur.dir == -1))
     if usePullback
         if not na(pend)
             cancelPending(pend)
+            evCancel := true
         float lim = close - pbFrac * slDistL
         float stp = close - slDistL
         label lb = showSig ? signalLabel(1, setupL, scoreL, lim, stp, tr("Limit entry — ", "دخول بأمر محدد — ")) : na
@@ -864,6 +875,7 @@ else if shortSig and (na(cur) or (reverseOn and cur.dir == 1))
     if usePullback
         if not na(pend)
             cancelPending(pend)
+            evCancel := true
         float lim = close + pbFrac * slDistS
         float stp = close + slDistS
         label lb = showSig ? signalLabel(-1, setupS, scoreS, lim, stp, tr("Limit entry — ", "دخول بأمر محدد — ")) : na
@@ -1047,16 +1059,21 @@ if barstate.islast and showPanel
 // ───────────────────────────── Alerts ─────────────────────────────
 alertcondition(newLong, "APEX FUSION BUY", "APEX FUSION BUY signal {{ticker}} {{interval}} @ {{close}} (below 1H: limit order placed)")
 alertcondition(evFill, "APEX FUSION entry filled", "APEX FUSION limit entry filled {{ticker}} {{interval}}")
-alertcondition(newShort, "APEX FUSION SELL", "APEX FUSION SELL {{ticker}} {{interval}} @ {{close}}")
+alertcondition(newShort, "APEX FUSION SELL", "APEX FUSION SELL signal {{ticker}} {{interval}} @ {{close}} (below 1H: limit order placed)")
+alertcondition(evCancel, "APEX FUSION limit cancelled", "APEX FUSION pending limit entry cancelled {{ticker}} {{interval}} — cancel the order at your broker")
 alertcondition(evTp1 or evTp2 or evTp3, "APEX FUSION target hit", "APEX FUSION target hit {{ticker}} {{interval}}")
 alertcondition(evSl, "APEX FUSION stop hit", "APEX FUSION stop hit {{ticker}} {{interval}}")
 alertcondition(evExit, "APEX FUSION trade closed (BE / trail / reverse / time)", "APEX FUSION trade closed {{ticker}} {{interval}}")
 
 if (newLong or newShort) and not na(pend)
     float pdist = math.abs(pend.limit - pend.stop)
-    alert('{"signal":"' + (newLong ? "BUY" : "SELL") + '","type":"limit","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","setup":"' + pend.setup + '","score":' + str.tostring(pend.score) + ',"entry":' + fmt(pend.limit) + ',"sl":' + fmt(pend.stop) + ',"tp1":' + fmt(pend.limit + pend.dir * k1 * pdist) + ',"tp2":' + fmt(pend.limit + pend.dir * k2 * pdist) + ',"tp3":' + fmt(pend.limit + pend.dir * k3 * pdist) + ',"valid_bars":' + str.tostring(pbBars) + '}', alert.freq_once_per_bar_close)
-if evFill and not na(cur)
-    alert('{"event":"FILLED","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","entry":' + fmt(cur.entry) + ',"sl":' + fmt(cur.sl) + ',"tp1":' + fmt(cur.tp1) + ',"tp2":' + fmt(cur.tp2) + ',"tp3":' + (na(cur.tp3) ? "null" : fmt(cur.tp3)) + '}', alert.freq_once_per_bar_close)
+    alert('{"signal":"' + (newLong ? "BUY" : "SELL") + '","type":"limit","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","setup":"' + pend.setup + '","score":' + str.tostring(pend.score) + ',"entry":' + fmt(pend.limit) + ',"sl":' + fmt(pend.stop) + ',"tp1":' + fmt(pend.limit + pend.dir * k1 * pdist) + ',"tp2":' + fmt(pend.limit + pend.dir * k2 * pdist) + ',"tp3":' + (pend.limit + pend.dir * k3 * pdist > syminfo.mintick ? fmt(pend.limit + pend.dir * k3 * pdist) : "null") + ',"valid_bars":' + str.tostring(pbBars) + '}', alert.freq_once_per_bar_close)
+if evCancel
+    alert('{"event":"CANCEL","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '"}', alert.freq_once_per_bar_close)
+if evFill
+    float fRisk = (fillPx - fillSl) * fillDir
+    float fTp3 = fillPx + fillDir * k3 * fRisk
+    alert('{"event":"FILLED","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","entry":' + fmt(fillPx) + ',"sl":' + fmt(fillSl) + ',"tp1":' + fmt(fillPx + fillDir * k1 * fRisk) + ',"tp2":' + fmt(fillPx + fillDir * k2 * fRisk) + ',"tp3":' + (fTp3 > syminfo.mintick ? fmt(fTp3) : "null") + '}', alert.freq_once_per_bar_close)
 if (newLong or newShort) and na(pend) and not na(cur)
     alert('{"signal":"' + (newLong ? "BUY" : "SELL") + '","type":"market","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","setup":"' + cur.setup + '","score":' + str.tostring(cur.score) + ',"entry":' + fmt(cur.entry) + ',"sl":' + fmt(cur.sl) + ',"tp1":' + fmt(cur.tp1) + ',"tp2":' + fmt(cur.tp2) + ',"tp3":' + (na(cur.tp3) ? "null" : fmt(cur.tp3)) + '}', alert.freq_once_per_bar_close)
 if evTp1 or evTp2 or evTp3 or evSl or evExit
