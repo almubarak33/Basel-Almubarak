@@ -39,7 +39,7 @@ const string PROF_RUN = "Trend Runner (1R / 2R / 8R + trail)"
 const string PROF_CUS = "Custom"
 
 lang        = input.string("العربية", "Language / اللغة", options = ["العربية", "English"], group = G_SIG)
-assetIn     = input.string("Auto", "Asset class", options = ["Auto", "Metals / FX / Commodities", "Crypto", "Stocks / Indices"], group = G_SIG, tooltip = "Auto reads syminfo.type. It sets the round-trip cost, the active-session filter (off for crypto) and the opening-range session.")
+assetIn     = input.string("Auto", "Asset class", options = ["Auto", "Metals / FX / Commodities", "Crypto", "Stocks / Indices"], group = G_SIG, tooltip = "Auto reads syminfo.type. It sets the round-trip cost, the active-session filter (off for crypto) and the opening-range session. The defaults were designed and validated on gold only; on silver, BTC/ETH/SOL and 8 US stocks they lost money in testing (see reports/).")
 minScore    = input.int(5, "Minimum APEX confluence score (0-7)", minval = 0, maxval = 7, group = G_SIG, tooltip = "Counts aligned conditions: HTF trend, EMA200 side, EMA21/55 order, ADX threshold, ADX rising, DI alignment, RSI side. Applies to trend setups. It is not a win probability.")
 useAnchor   = input.bool(true, "Anchor trend must agree (Daily on intraday charts)", group = G_SIG, tooltip = "The strongest filter in the gold tests: signals against or without a Daily trend lost money.")
 useHtfGate  = input.bool(true, "HTF trend must agree (4H on 5m / 15m / 1H)", group = G_SIG)
@@ -1021,13 +1021,13 @@ panelText() =>
         "Normal" => size.normal
         => size.small
 
-var table pnl = table.new(panelPosition(), 2, 14 + N_SETUPS, bgcolor = color.new(#131722, 15), frame_color = color.new(neutCol, 60), frame_width = 1, border_color = color.new(neutCol, 85), border_width = 1)
+var table pnl = table.new(panelPosition(), 2, 15 + N_SETUPS, bgcolor = color.new(#131722, 15), frame_color = color.new(neutCol, 60), frame_width = 1, border_color = color.new(neutCol, 85), border_width = 1)
 cellRow(int r, string k, string v, color vc) =>
     table.cell(pnl, 0, r, k, text_color = color.new(#d1d4dc, 0), text_size = panelText(), text_halign = text.align_left)
     table.cell(pnl, 1, r, v, text_color = vc, text_size = panelText(), text_halign = text.align_right)
 
 if barstate.islast and showPanel
-    table.clear(pnl, 0, 0, 1, 13 + N_SETUPS)
+    table.clear(pnl, 0, 0, 1, 14 + N_SETUPS)
     color hd = color.new(#2a2e39, 0)
     table.cell(pnl, 0, 0, "APEX Fusion Pro", text_color = color.white, bgcolor = hd, text_size = panelText(), text_halign = text.align_left)
     table.cell(pnl, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.white, bgcolor = hd, text_size = panelText(), text_halign = text.align_right)
@@ -1048,8 +1048,9 @@ if barstate.islast and showPanel
     string state = na(cur) and not na(pend) ? (pend.dir == 1 ? "BUY LIMIT " : "SELL LIMIT ") + fmt(pend.limit) + " (" + pend.setup + ")" : na(cur) ? tr("Flat — waiting for a setup", "لا صفقة — بانتظار إشارة") : (cur.dir == 1 ? "BUY " : "SELL ") + cur.setup + " @ " + fmt(cur.entry) + (cur.hit1 ? " ✅" : "")
     cellRow(12, tr("Now", "الآن"), state, na(cur) ? neutCol : cur.dir == 1 ? buyCol : sellCol)
     cellRow(13, tr("Filters", "الفلاتر"), (useAnchor ? anchorTf + (anchorTrend == 1 ? "↑ " : anchorTrend == -1 ? "↓ " : "→ ") : "") + (useHtfGate ? htf + (htfTrend == 1 ? "↑ " : htfTrend == -1 ? "↓ " : "→ ") : "") + (sessApplies ? (inSessRaw ? tr("session ✓", "الجلسة ✓") : tr("session ✗", "الجلسة ✗")) : ""), white)
+    cellRow(14, tr("Tested on", "مُختبر على"), isGold ? tr("Gold ✓ (5m / 15m / 1H)", "الذهب ✓ (5د / 15د / ساعة)") : tr("⚠ Not profitable in tests on silver, crypto, stocks", "⚠ غير رابح في اختبارات الفضة والكريبتو والأسهم"), isGold ? tpCol : slCol)
     if showSetRows
-        int r = 14
+        int r = 15
         for i = 0 to N_SETUPS - 1
             int sn = setN.get(i)
             if sn > 0

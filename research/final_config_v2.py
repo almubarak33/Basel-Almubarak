@@ -18,7 +18,13 @@ PROFILES = {
 EXEC = dict(entry_mode="pullback", pb_frac=0.33, pb_bars=3, min_stop_pct=0.43)
 
 def cost_for(asset):
+    """Pine 'Auto' round-trip cost: gold 0.01%, silver/platinum/copper 0.06%, crypto 0.10%, others (stocks) 0.03%."""
     return {"crypto": 0.10, "silver": 0.06, "gold": 0.01}.get(asset, 0.03)
+
+
+def _asset_kw(asset):
+    # Pine 'Auto' opening range: crypto 00:00-23:00 UTC, everything else 09:30-16:00 New York
+    return dict(orb_start_ny=(0, 0), orb_end_ny=(23, 0)) if asset == "crypto" else {}
 
 def params(tf, prof, asset="gold", cost=None, **over):
     kw = dict(PROFILES[prof]); kw.update(EXEC); kw.update(over)
@@ -56,8 +62,8 @@ def final_params(tf, asset="gold", prof="auto", cost=None):
         prof = "MaxWin" if tf < 60 else "HighWin"
     c = cost_for(asset) if cost is None else cost
     if tf < 60:
-        return params(tf, prof, asset, cost=c)
-    return Params(tf_minutes=tf, cost_pct=c, **PROFILES[prof])
+        return params(tf, prof, asset, cost=c, **_asset_kw(asset))
+    return Params(tf_minutes=tf, cost_pct=c, **PROFILES[prof], **_asset_kw(asset))
 
 def final_signals(df, F, P, asset="gold"):
     if P.tf_minutes < 60:

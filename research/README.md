@@ -14,6 +14,7 @@ Python mirror of `indicators/APEX_Fusion_Pro.pine`, used to design and test the 
 | `v2_lab.py`, `v2_run1-4.py`, `v3_mr.py`, `v3_maxwin.py` | v2 research: pullback limit entry, Asian-range sweep / London breakout, candle & range filters, volatility floor, RSI(2) pullback, Max Win-Rate profile |
 | `final_config_v2.py` | **shipped defaults (v2.1)**: execution pack below 1H + Max Win-Rate; v1 execution + High Win-Rate on 1H+ |
 | `validate_final.py` | definitive tables for the shipped defaults → `results/validation_final.csv`, monthly, per setup, trade lists |
+| `fetch_assets.py`, `test_assets.py`, `asset_diag.py` | cross-asset test (crypto data is not committed: run `fetch_assets.py` to re-download it from the Binance archive) of the shipped defaults on silver, BTC/ETH/SOL and 8 US stocks → `results/cross_asset*.csv` |
 | `htf_align_check.py` | sensitivity to the 4H bar anchor (17:00 vs 18:00 New York) |
 
 ```bash

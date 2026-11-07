@@ -27,7 +27,7 @@ NAN = float("nan")
 # ───────────────────────────── data ─────────────────────────────
 
 
-def load(name: str, spot_hours: bool = True) -> pd.DataFrame:
+def load(name: str, spot_hours: bool = True, asset: str = "metal") -> pd.DataFrame:
     """Load a dataset. spot_hours drops bars when spot metals are closed
     (Fri 17:00 ET → Sun 18:00 ET and the daily 17:00–18:00 ET break), so a 24/7
     perpetual or tokenised-gold feed has the same bar sequence as a spot XAUUSD chart."""
@@ -35,12 +35,15 @@ def load(name: str, spot_hours: bool = True) -> pd.DataFrame:
     df["ts"] = pd.to_datetime(df["t"], unit="s", utc=True)
     ny = df["ts"].dt.tz_convert("America/New_York")
     df["ny"] = ny
+    if asset != "metal":
+        spot_hours = False  # crypto trades 24/7; Yahoo stock bars are regular-hours only
     if spot_hours:
         wd = ny.dt.weekday  # Mon=0 … Sun=6
         hr = ny.dt.hour
         closed = (wd == 5) | ((wd == 4) & (hr >= 17)) | ((wd == 6) & (hr < 18)) | (hr == 17)
         df = df[~closed]
     df = df.reset_index(drop=True)
+    df.attrs["asset"] = asset
     return df
 
 
@@ -224,15 +227,34 @@ def vwap_session(df, src, day_id):
 HTF_START_HOUR = 18  # New York hour where HTF (4H/D) bars are anchored; OANDA-style feeds use 17
 
 
-def htf_bucket(df, htf_minutes: int, start_hour: int = None) -> np.ndarray:
+def session_clock(df, htf=True):
+    """Clock and session start used by TradingView for this asset class:
+    metals: New York time, day starts 18:00 (17:00-18:00 has no bars); stocks: New York time, the
+    session starts 09:30 (4H bars 09:30-13:30 / 13:30-16:00); crypto: UTC, day starts 00:00."""
+    asset = df.attrs.get("asset", "metal")
+    if asset == "crypto":
+        return df["ts"], 0.0
+    if asset == "stock":
+        return df["ny"], 9.5
+    return df["ny"], float(HTF_START_HOUR if htf else 18)
+
+
+def session_day_df(df) -> np.ndarray:
+    clock, start = session_clock(df, htf=False)
+    shifted = clock - pd.Timedelta(hours=start)
+    return (shifted.dt.year * 10000 + shifted.dt.month * 100 + shifted.dt.day).to_numpy()
+
+
+def htf_bucket(df, htf_minutes: int, start_hour: float = None) -> np.ndarray:
     """HTF bar id aligned to the session start (as TradingView aligns 4H/1D bars)."""
-    start_hour = HTF_START_HOUR if start_hour is None else start_hour
-    shifted = df["ny"] - pd.Timedelta(hours=start_hour)
+    clock, start = session_clock(df)
+    start = start if start_hour is None else start_hour
+    shifted = clock - pd.Timedelta(hours=start)
     day = (shifted.dt.year * 10000 + shifted.dt.month * 100 + shifted.dt.day).to_numpy().astype(np.int64)
     if htf_minutes >= 43200:   # monthly
         return (shifted.dt.year * 100 + shifted.dt.month).to_numpy().astype(np.int64)
-    if htf_minutes >= 10080:   # weekly (session week starts Sunday 18:00 NY)
-        iso = (shifted + pd.Timedelta(days=1)).dt.isocalendar()
+    if htf_minutes >= 10080:   # weekly (metals: session week starts Sunday 18:00 NY; others: Monday)
+        iso = (shifted + pd.Timedelta(days=1 if df.attrs.get("asset", "metal") == "metal" else 0)).dt.isocalendar()
         return (iso.year.astype(np.int64) * 100 + iso.week.astype(np.int64)).to_numpy()
     if htf_minutes >= 1440:
         return day
@@ -240,10 +262,13 @@ def htf_bucket(df, htf_minutes: int, start_hour: int = None) -> np.ndarray:
     return day * 100 + mins // htf_minutes
 
 
-def htf_trend(df, htf_minutes, ema_len):
-    """APEX htfTrendCalc on the HTF series, previous completed HTF bar mapped to chart bars."""
+def htf_trend(df, htf_minutes, ema_len, src=None):
+    """APEX htfTrendCalc on the HTF series, previous completed HTF bar mapped to chart bars.
+    src: optional longer-history dataframe (same asset) used to build the HTF bars, like request.security."""
     b = htf_bucket(df, htf_minutes)
-    g = pd.DataFrame({"b": b, "o": df.o, "h": df.h, "l": df.l, "c": df.c}).groupby("b", sort=False)
+    base = df if src is None else src
+    bs = b if src is None else htf_bucket(src, htf_minutes)
+    g = pd.DataFrame({"b": bs, "o": base.o.values, "h": base.h.values, "l": base.l.values, "c": base.c.values}).groupby("b", sort=True)
     H = g.agg(o=("o", "first"), h=("h", "max"), l=("l", "min"), c=("c", "last"))
     hc, hh, hl = H.c.to_numpy(), H.h.to_numpy(), H.l.to_numpy()
     _, d = supertrend(hh, hl, hc, 3.0, 10)
@@ -251,7 +276,7 @@ def htf_trend(df, htf_minutes, ema_len):
     tr_ = np.where(np.isnan(e) | np.isnan(d), 0, np.where((hc > e) & (d < 0), 1, np.where((hc < e) & (d > 0), -1, 0)))
     prev = np.concatenate([[0], tr_[:-1]])  # expression[1]
     m = pd.Series(prev, index=H.index)
-    return m.reindex(b).to_numpy().astype(int)
+    return m.reindex(b).fillna(0).to_numpy().astype(int)
 
 
 def auto_htf_minutes(tf_minutes):
@@ -266,6 +291,7 @@ def resample(df, minutes):
     out = g.agg(t=("t", "first"), o=("o", "first"), h=("h", "max"), l=("l", "min"), c=("c", "last"), v=("v", "sum")).reset_index(drop=True)
     out["ts"] = pd.to_datetime(out["t"], unit="s", utc=True)
     out["ny"] = out["ts"].dt.tz_convert("America/New_York")
+    out.attrs["asset"] = df.attrs.get("asset", "metal")
     return out
 
 
@@ -341,7 +367,7 @@ class Params:
 # ───────────────────────────── features ─────────────────────────────
 
 
-def features(df: pd.DataFrame, P: Params) -> dict:
+def features(df: pd.DataFrame, P: Params, htf_src=None) -> dict:
     o, h, l, c, v = (df[k].to_numpy(float) for k in ["o", "h", "l", "c", "v"])
     N = len(c)
     F = {"o": o, "h": h, "l": l, "c": c, "v": v, "N": N}
@@ -361,14 +387,16 @@ def features(df: pd.DataFrame, P: Params) -> dict:
     with np.errstate(divide="ignore", invalid="ignore"):
         F["chop"] = np.where(rng14 > 0, 100 * np.log10(trs / rng14) / np.log10(14), 50.0)
     F["volMa"] = sma(v, 20)
-    day = session_day(df["ny"])
+    day = session_day_df(df)
     F["day"] = day
     F["vwap"] = vwap_session(df, (h + l + c) / 3, day)
     htf_min = P.htf_minutes or auto_htf_minutes(P.tf_minutes)
     use21 = htf_min >= 1440
-    F["htf"] = htf_trend(df, htf_min, 21 if use21 else 50)
+    F["htf"] = htf_trend(df, htf_min, 21 if use21 else 50, src=htf_src)
     F["hour_ny"] = df["ny"].dt.hour.to_numpy()
     F["min_ny"] = df["ny"].dt.minute.to_numpy()
+    oc = df["ts"] if df.attrs.get("asset", "metal") == "crypto" else df["ny"]  # opening-range clock (Pine: UTC for crypto)
+    F["orb_hm"] = (oc.dt.hour * 60 + oc.dt.minute).to_numpy()
     F["ts"] = df["t"].to_numpy()
     # APEX confluence score
     sc = {}
@@ -529,7 +557,7 @@ def _divergence(F, P):
 
 def _orb(F, P):
     h, l, c, N = F["h"], F["l"], F["c"], F["N"]
-    hm = F["hour_ny"] * 60 + F["min_ny"]
+    hm = F["orb_hm"]
     s0 = P.orb_start_ny[0] * 60 + P.orb_start_ny[1]
     s1 = P.orb_end_ny[0] * 60 + P.orb_end_ny[1]
     inS = (hm >= s0) & (hm < s1)

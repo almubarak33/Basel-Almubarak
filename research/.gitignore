@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .cache/
+data/BTCUSDT_*
+data/ETHUSDT_*
+data/SOLUSDT_*
