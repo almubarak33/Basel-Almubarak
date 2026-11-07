@@ -11,11 +11,15 @@ Python mirror of `indicators/APEX_Fusion_Pro.pine`, used to design and test the 
 | `final_config.py` | the frozen Fusion configuration |
 | `validate.py` | out-of-sample, cross-timeframe and cross-asset validation → `results/validation.csv` |
 | `report_tables.py` | cost sensitivity, monthly, per-setup, 4H tables → `results/` |
+| `v2_lab.py`, `v2_run1-4.py`, `v3_mr.py`, `v3_maxwin.py` | v2 research: pullback limit entry, Asian-range sweep / London breakout, candle & range filters, volatility floor, RSI(2) pullback, Max Win-Rate profile |
+| `final_config_v2.py` | **shipped defaults (v2.1)**: execution pack below 1H + Max Win-Rate; v1 execution + High Win-Rate on 1H+ |
+| `validate_final.py` | definitive tables for the shipped defaults → `results/validation_final.csv`, monthly, per setup, trade lists |
 | `htf_align_check.py` | sensitivity to the 4H bar anchor (17:00 vs 18:00 New York) |
 
 ```bash
 pip install pandas numpy
-python3 validate.py        # main results table
+python3 validate_final.py  # shipped defaults (v2.1), 5m / 15m / 1h
+python3 validate.py        # v1 results table
 python3 report_tables.py   # supplementary tables
 ```
 

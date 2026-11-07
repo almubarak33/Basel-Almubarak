@@ -271,14 +271,15 @@ def resample(df, minutes):
 
 # ───────────────────────────── parameters ─────────────────────────────
 
-SETUPS = ["BRK", "FLIP", "PB", "EMA", "BRT", "VWAP", "ORB", "SWEEP", "DIV", "REB"]
-TREND_SETUPS = {"BRK", "FLIP", "PB", "EMA", "BRT", "VWAP", "ORB"}
-REVERSAL_SETUPS = {"SWEEP", "DIV", "REB"}
+SETUPS = ["BRK", "FLIP", "PB", "EMA", "BRT", "VWAP", "ORB", "SWEEP", "DIV", "REB", "ASWP", "ABRK"]
+TREND_SETUPS = {"BRK", "FLIP", "PB", "EMA", "BRT", "VWAP", "ORB", "ABRK"}
+REVERSAL_SETUPS = {"SWEEP", "DIV", "REB", "ASWP"}
 
 
 @dataclass
 class Params:
     tf_minutes: int = 15
+    htf_minutes: int = 0            # 0 = APEX auto (5m->1H, 15m/1H->4H ...); v2 uses 240 for every chart <= 1H
     # APEX context
     adx_min: float = 25.0
     don_len: int = 20
@@ -323,7 +324,18 @@ class Params:
     cost_pct: float = 0.03
     small_guard: bool = True
     cg_max_pct: float = 7.0
+    mr_exit: float = 0.0            # >0: MR trades exit the remaining position at the close when RSI(2) > mr_exit (long) / < 100-mr_exit (short)
+    min_stop_pct: float = 0.0       # v2 volatility floor: skip signals whose stop is < this % of price (charts < 1H)
     warm: int = 250
+    # v2: professional-technique options
+    entry_mode: str = "close"       # close = market at signal close | pullback = limit order on a retracement
+    pb_frac: float = 0.33           # limit price = close - dir * pb_frac * stop distance
+    pb_bars: int = 3                # limit order validity (bars after the signal)
+    asia_start: int = 20            # Asian range: 20:00 -> 02:00 New York
+    asia_end: int = 2
+    sweep_end: int = 11             # sweeps / breakouts of the Asian range count until 11:00 New York
+    asia_min_pct: float = 0.15      # skip days whose Asian range is narrower / wider than this % of price
+    asia_max_pct: float = 1.60
 
 
 # ───────────────────────────── features ─────────────────────────────
@@ -339,6 +351,7 @@ def features(df: pd.DataFrame, P: Params) -> dict:
     F["st"], F["stDir"] = supertrend(h, l, c, P.st_factor, P.st_len)
     F["diP"], F["diM"], F["adx"] = dmi(h, l, c, 14, 14)
     F["rsi"] = rsi(c, 14)
+    F["rsi2"] = rsi(c, 2)
     tsm = np.zeros(N)
     for k in (20, 50, 100, 200):
         tsm += np.sign(c - shift(c, k))
@@ -351,7 +364,7 @@ def features(df: pd.DataFrame, P: Params) -> dict:
     day = session_day(df["ny"])
     F["day"] = day
     F["vwap"] = vwap_session(df, (h + l + c) / 3, day)
-    htf_min = auto_htf_minutes(P.tf_minutes)
+    htf_min = P.htf_minutes or auto_htf_minutes(P.tf_minutes)
     use21 = htf_min >= 1440
     F["htf"] = htf_trend(df, htf_min, 21 if use21 else 50)
     F["hour_ny"] = df["ny"].dt.hour.to_numpy()
@@ -443,6 +456,8 @@ def setups(F: dict, P: Params) -> dict:
     S["ORB"] = _orb(F, P)
     # APEX: support rebound (+ symmetric resistance rejection for shorts)
     S["REB"] = _rebound(F, P)
+    # v2: Asian-range liquidity sweep (Judas swing) and London/NY breakout of the Asian range
+    S["ASWP"], S["ABRK"] = _asian_range(F, P)
     return {k: (np.nan_to_num(L, nan=0).astype(bool) & ready, np.nan_to_num(Sx, nan=0).astype(bool) & ready) for k, (L, Sx) in S.items()}
 
 
@@ -591,6 +606,51 @@ def _rebound(F, P):
     return out[0], out[1]
 
 
+def _asian_range(F, P):
+    """Asian range = high/low of bars from asia_start to asia_end New York (one range per trading day).
+    ASWP: after the range is complete and before sweep_end, a bar trades beyond one side and closes back
+          inside with a body in the reversal direction -> trade back into the range (one per side per day).
+    ABRK: first close beyond the range in that window -> trade the breakout (one per day).
+    Also fills F["aswpStopL"/"aswpStopS"]: stop distance beyond the sweep extreme (last 3 bars) + 0.25 ATR."""
+    h, l, c, o, a, N = F["h"], F["l"], F["c"], F["o"], F["atr"], F["N"]
+    hr, day = F["hour_ny"], F["day"]
+    inAsia = (hr >= P.asia_start) | (hr < P.asia_end)
+    inWin = (hr >= P.asia_end) & (hr < P.sweep_end)
+    swL = np.zeros(N, bool); swS = np.zeros(N, bool); bkL = np.zeros(N, bool); bkS = np.zeros(N, bool)
+    stopL = np.full(N, NAN); stopS = np.full(N, NAN)
+    aH = aL = NAN
+    cur_day = None
+    usedL = usedS = usedB = False
+    for i in range(N):
+        if day[i] != cur_day:
+            cur_day = day[i]
+            aH = aL = NAN
+            usedL = usedS = usedB = False
+        if inAsia[i]:
+            aH = h[i] if math.isnan(aH) else max(aH, h[i])
+            aL = l[i] if math.isnan(aL) else min(aL, l[i])
+            continue
+        if not inWin[i] or math.isnan(aH) or math.isnan(a[i]):
+            continue
+        width = (aH - aL) / c[i] * 100
+        if width < P.asia_min_pct or width > P.asia_max_pct:
+            continue
+        lo3 = min(l[max(0, i - 2):i + 1])
+        hi3 = max(h[max(0, i - 2):i + 1])
+        if not usedL and lo3 < aL and c[i] > aL and c[i] > o[i]:
+            swL[i] = True; usedL = True
+            stopL[i] = c[i] - (lo3 - 0.25 * a[i])
+        if not usedS and hi3 > aH and c[i] < aH and c[i] < o[i]:
+            swS[i] = True; usedS = True
+            stopS[i] = (hi3 + 0.25 * a[i]) - c[i]
+        if not usedB and i > 0 and c[i] > aH and c[i - 1] <= aH:
+            bkL[i] = True; usedB = True
+        elif not usedB and i > 0 and c[i] < aL and c[i - 1] >= aL:
+            bkS[i] = True; usedB = True
+    F["aswpStopL"], F["aswpStopS"] = stopL, stopS
+    return (swL, swS), (bkL, bkS)
+
+
 # ───────────────────────────── trade simulator ─────────────────────────────
 
 
@@ -618,11 +678,17 @@ class Trade:
     costR: float = NAN
 
 
-def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, label=None, start=0, end=None) -> list:
-    """APEX trade engine. longSig/shortSig are final (gated) entry arrays; label[i] names the setup."""
+def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, label=None, start=0, end=None,
+             distL=None, distS=None) -> list:
+    """APEX trade engine. longSig/shortSig are final (gated) entry arrays; label[i] names the setup.
+    distL/distS optionally override the stop distance per bar (setup-specific structural stops)."""
     o, h, l, c, a, N = F["o"], F["h"], F["l"], F["c"], F["atr"], F["N"]
     end = N if end is None else end
-    slL, slS, chL, chS = F["slL"], F["slS"], F["chandL"], F["chandS"]
+    slL = F["slL"] if distL is None else distL
+    slS = F["slS"] if distS is None else distS
+    chL, chS = F["chandL"], F["chandS"]
+    pend = None  # pending limit order: dict(dir, bar, limit, stop, setup)
+    fills = {"signals": 0, "filled": 0}
     k1, k2, k3, w1, w2 = P.k1, P.k2, P.k3, P.w1, P.w2
     trades = []
     cur = None
@@ -705,9 +771,33 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
                             t.openW = 0.0
                             close(t, i, t.tp3, "TP3")
                             cur = None
+                        if cur is not None and P.mr_exit > 0 and t.setup == "MR" and (
+                                (d == 1 and F["rsi2"][i] > P.mr_exit) or (d == -1 and F["rsi2"][i] < 100 - P.mr_exit)):
+                            close(t, i, c[i], "MR exit")
+                            cur = None
                         if cur is not None and P.max_bars > 0 and i - t.bar >= P.max_bars:
                             close(t, i, c[i], "Time")
                             cur = None
+        # 1b) pending pullback limit order (only exists while flat)
+        if pend is not None and cur is None and i > pend["bar"]:
+            pd_ = pend["dir"]
+            if i - pend["bar"] > P.pb_bars or ((o[i] <= pend["stop"]) if pd_ == 1 else (o[i] >= pend["stop"])):
+                pend = None
+            elif (l[i] <= pend["limit"]) if pd_ == 1 else (h[i] >= pend["limit"]):
+                fill = min(o[i], pend["limit"]) if pd_ == 1 else max(o[i], pend["limit"])
+                risk = (fill - pend["stop"]) * pd_
+                if risk > 0:
+                    tp3 = fill + pd_ * k3 * risk
+                    cur = Trade(pd_, i, pend["setup"], fill, pend["stop"], pend["stop"], risk,
+                                fill + pd_ * k1 * risk, fill + pd_ * k2 * risk, tp3 if tp3 > 0 else NAN)
+                    fills["filled"] += 1
+                    # unknown order inside the fill bar: if the bar also reached the stop, assume it was hit
+                    if (l[i] <= cur.sl) if pd_ == 1 else (h[i] >= cur.sl):
+                        close(cur, i, cur.sl, "SL")
+                        cur = None
+                pend = None
+        elif pend is not None and cur is not None:
+            pend = None
         # 2) new signals at the close
         if i < P.warm or math.isnan(a[i]) or a[i] <= 0:
             continue
@@ -719,9 +809,18 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
             dist = sl[i]
             if smallTf and P.small_guard and dist < P.cost_pct / 100 * c[i] / (P.cg_max_pct / 100):
                 continue
+            if smallTf and P.min_stop_pct > 0 and dist < P.min_stop_pct / 100 * c[i]:
+                continue
+            if np.isnan(dist) or dist <= 0:
+                continue
             if cur is not None:
                 close(cur, i, c[i], "Reverse")
                 cur = None
+            if P.entry_mode == "pullback":
+                fills["signals"] += 1
+                pend = dict(dir=d, bar=i, limit=c[i] - d * P.pb_frac * dist, stop=c[i] - d * dist,
+                            setup=label[i] if label is not None else "")
+                break
             e = c[i]
             tp3 = e + d * k3 * dist
             cur = Trade(d, i, label[i] if label is not None else "", e, e - d * dist, e - d * dist, dist,
@@ -730,6 +829,7 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
     if cur is not None:
         cur.reason = "Open"
         cur.R = NAN
+    simulate.last_fills = fills
     return trades
 
 
