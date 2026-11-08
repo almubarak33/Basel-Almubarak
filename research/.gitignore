@@ -4,3 +4,4 @@ __pycache__/
 data/BTCUSDT_*
 data/ETHUSDT_*
 data/SOLUSDT_*
+data_bot/
