@@ -94,6 +94,8 @@ const double SL_BUF     = 0.25;
 const double SL_MIN_ATR = 0.8;
 const double SL_MAX_ATR = 3.5;
 const int    MAX_ARROWS = 60;
+const int    H4_ANCHOR_SEC = 18 * 3600;   // 4H blocks start 18:00 New York (18, 22, 02, 06, 10, 14), as tested
+const int    H4_SEC     = 4 * 3600;
 
 CTrade   g_trade;
 datetime g_lastBar = 0;
@@ -141,6 +143,13 @@ int VolumeDigits()
    int d = 0;
    while(step < 1.0 - 1e-9 && d < 8) { step *= 10.0; d++; }
    return d;
+  }
+
+double RoundToTick(const double price)
+  {
+   double tick = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tick <= 0.0) return NormalizeDouble(price, _Digits);
+   return NormalizeDouble(MathRound(price / tick) * tick, _Digits);
   }
 
 double NormalizeVolume(const double v)
@@ -396,20 +405,59 @@ int HtfValueAt(const datetime t, const MqlRates &h[], const int &tr[], const int
    return k >= 1 ? tr[k - 1] : 0;
   }
 
+//--- 4H trend built from the chart's candles in New York 4-hour blocks starting 18:00, as in the tested
+//--- version. Independent of the broker's server time. Returns the trend of the block that completed
+//--- before the block of the last candle (no repainting).
+int H4TrendFromChart(const MqlRates &r[], const int n)
+  {
+   MqlRates agg[];
+   ArrayResize(agg, n);
+   long key = -1;
+   int m = -1;
+   for(int k = 0; k < n; k++)
+     {
+      long kk = ((long)ToNewYork(r[k].time) - H4_ANCHOR_SEC) / H4_SEC;
+      if(m < 0 || kk != key)
+        {
+         m++;
+         key = kk;
+         agg[m] = r[k];
+        }
+      else
+        {
+         agg[m].high = MathMax(agg[m].high, r[k].high);
+         agg[m].low = MathMin(agg[m].low, r[k].low);
+         agg[m].close = r[k].close;
+        }
+     }
+   if(m < 1) return 0;
+   int tr[];
+   HtfTrendSeries(agg, m + 1, 50, tr);
+   return tr[m - 1];
+  }
+
 //+------------------------------------------------------------------+
 //| Signal on the last closed candle                                 |
 //+------------------------------------------------------------------+
-bool ComputeSignal(int &dirOut, double &stopOut, string &setupOut, int &scoreOut)
+bool ComputeSignal(int &dirOut, double &stopOut, string &setupOut, int &scoreOut, bool &retryOut)
   {
    dirOut = 0;
+   retryOut = false;
    MqlRates r[], h4[], d1[];
    ArraySetAsSeries(r, false); ArraySetAsSeries(h4, false); ArraySetAsSeries(d1, false);
    int n = CopyRates(_Symbol, _Period, 1, LOOKBACK, r);          // closed candles only
-   int nh = CopyRates(_Symbol, PERIOD_H4, 1, HTF_BARS, h4);
+   bool buildH4 = PeriodSeconds(_Period) < H4_SEC;              // H1 (and lower): build 4H from the chart
+   int nh = buildH4 ? 0 : CopyRates(_Symbol, PERIOD_H4, 1, HTF_BARS, h4);
    int nd = CopyRates(_Symbol, PERIOD_D1, 1, D1_BARS, d1);
-   if(n < 400 || nh < 100 || nd < 60)
+   if(n < 400 || (!buildH4 && nh < 100) || nd < 60)
      {
-      PrintFormat("APEX: not enough history (H1 %d, H4 %d, D1 %d) — waiting", n, nh, nd);
+      static datetime lastWarn = 0;
+      if(TimeCurrent() - lastWarn >= 60)
+        {
+         PrintFormat("APEX: not enough history yet (H1 %d, H4 %d, D1 %d) — retrying", n, nh, nd);
+         lastWarn = TimeCurrent();
+        }
+      retryOut = true;
       return false;
      }
    int i = n - 1;
@@ -431,9 +479,14 @@ bool ComputeSignal(int &dirOut, double &stopOut, string &setupOut, int &scoreOut
 
    //--- higher timeframes (previous completed bar)
    int trH4[], trD1[];
-   HtfTrendSeries(h4, nh, 50, trH4);
+   int htf = 0;
+   if(buildH4) htf = H4TrendFromChart(r, n);
+   else
+     {
+      HtfTrendSeries(h4, nh, 50, trH4);
+      htf = HtfValueAt(r[i].time, h4, trH4, nh, PeriodSeconds(PERIOD_H4));
+     }
    HtfTrendSeries(d1, nd, 21, trD1);
-   int htf = HtfValueAt(r[i].time, h4, trH4, nh, PeriodSeconds(PERIOD_H4));
    int anchor = HtfValueAt(r[i].time, d1, trD1, nd, PeriodSeconds(PERIOD_D1));
 
    //--- APEX confluence score
@@ -630,6 +683,24 @@ void SaveState(const long posId, const double vol0, const double entry, const do
    GlobalVariableSet(GvName(posId, "stage"), stage);
   }
 
+//--- the partial close of the next stage already happened (only the stop move is pending)
+bool PartialDone(const long posId, const int nextStage) { return GlobalVariableCheck(GvName(posId, "p" + IntegerToString(nextStage))); }
+void MarkPartial(const long posId, const int nextStage) { GlobalVariableSet(GvName(posId, "p" + IntegerToString(nextStage)), 1.0); }
+
+//--- move the stop to `level` if it improves it; true when the stop is at or beyond the level afterwards
+bool MoveStopTo(const ulong tk, const int d, const double level, const double px, const double minGap)
+  {
+   double curSl = PositionGetDouble(POSITION_SL);
+   if(curSl != 0.0 && (curSl - level) * d >= 0) return true;               // already there or better
+   if(MathAbs(px - level) < minGap) return false;                          // too close to price now; retry next tick
+   if(!g_trade.PositionModify(tk, level, PositionGetDouble(POSITION_TP)))
+     {
+      PrintFormat("APEX: stop move failed %d %s — retrying", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+      return false;
+     }
+   return true;
+  }
+
 bool LoadState(const long posId, double &vol0, double &entry, double &risk, int &stage)
   {
    if(!GlobalVariableCheck(GvName(posId, "vol0"))) return false;
@@ -645,11 +716,18 @@ void CleanupState()
    ulong tk = 0; long posId = -1;
    bool has = SelectOurPosition(tk, posId);
    string keep = has ? Prefix() + IntegerToString(posId) + "_" : "";
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   string today = IntegerToString(dt.year * 10000 + dt.mon * 100 + dt.day);
    for(int k = GlobalVariablesTotal() - 1; k >= 0; k--)
      {
       string nm = GlobalVariableName(k);
       if(StringFind(nm, Prefix()) != 0) continue;
-      if(StringFind(nm, Prefix() + "day") == 0 || StringFind(nm, Prefix() + "halt") == 0) continue;
+      if(StringFind(nm, Prefix() + "dayeq_") == 0 || StringFind(nm, Prefix() + "halt_") == 0)
+        {
+         if(StringFind(nm, today) < 0) GlobalVariableDel(nm);   // only today's values matter
+         continue;
+        }
       if(has && StringFind(nm, keep) == 0) continue;
       GlobalVariableDel(nm);
      }
@@ -728,6 +806,12 @@ double LotsForRisk(const int d, const double price, const double stop)
 void TryEnter()
   {
    if(!g_pend.active) return;
+   ulong openTk = 0; long openId = -1;
+   if(SelectOurPosition(openTk, openId))      // a previous attempt already filled (e.g. timeout or partial fill)
+     {
+      g_pend.active = false;
+      return;
+     }
    if(TimeCurrent() > g_pend.expires)
      {
       Print("APEX: signal dropped — spread stayed above the limit during the entry window");
@@ -738,7 +822,7 @@ void TryEnter()
    if(ask <= 0 || bid <= 0 || ask - bid > InpMaxSpread) return;   // wait for a normal spread
    int d = g_pend.dir;
    double price = d == 1 ? ask : bid;
-   double stop = NormalizeDouble(g_pend.stop, _Digits);
+   double stop = RoundToTick(g_pend.stop);
    if((d == 1 && price <= stop) || (d == -1 && price >= stop))
      {
       Print("APEX: price is already beyond the stop — signal skipped");
@@ -746,7 +830,7 @@ void TryEnter()
       return;
      }
    double risk = MathAbs(price - stop);
-   double tp3 = NormalizeDouble(price + d * g_k3 * risk, _Digits);
+   double tp3 = RoundToTick(price + d * g_k3 * risk);
    long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
    if(risk < stopsLevel * _Point)
      {
@@ -763,7 +847,8 @@ void TryEnter()
      }
    string comment = "APEX " + g_pend.setup;
    bool ok = d == 1 ? g_trade.Buy(lots, _Symbol, ask, stop, tp3, comment) : g_trade.Sell(lots, _Symbol, bid, stop, tp3, comment);
-   if(!ok || (g_trade.ResultRetcode() != TRADE_RETCODE_DONE && g_trade.ResultRetcode() != TRADE_RETCODE_PLACED))
+   uint rc = g_trade.ResultRetcode();
+   if(!ok || (rc != TRADE_RETCODE_DONE && rc != TRADE_RETCODE_PLACED && rc != TRADE_RETCODE_DONE_PARTIAL))
      {
       PrintFormat("APEX: order failed %d %s — will retry while the entry window is open", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
       return;
@@ -776,7 +861,7 @@ void TryEnter()
       double vol = PositionGetDouble(POSITION_VOLUME);
       double fillRisk = MathAbs(fill - stop);
       SaveState(posId, vol, fill, fillRisk, 0);
-      double tpFromFill = NormalizeDouble(fill + d * g_k3 * fillRisk, _Digits);
+      double tpFromFill = RoundToTick(fill + d * g_k3 * fillRisk);
       if(MathAbs(tpFromFill - tp3) >= _Point)
          g_trade.PositionModify(tk, stop, tpFromFill);   // targets are measured from the real fill
       PrintFormat("APEX: %s %s %.2f lots @ %s  stop %s  risk %s", d == 1 ? "BUY" : "SELL", g_pend.setup, vol,
@@ -797,16 +882,24 @@ void ManagePosition()
    double vol = PositionGetDouble(POSITION_VOLUME);
    if(!LoadState(posId, vol0, entry, risk, stage))
      {
-      //--- adopted after a restart without saved state: rebuild from the position
+      //--- adopted without saved state (e.g. lost terminal variables): rebuild conservatively
       entry = PositionGetDouble(POSITION_PRICE_OPEN);
-      risk = sl > 0 ? MathAbs(entry - sl) : 0.0;
       vol0 = vol;
-      stage = (sl > 0 && (sl - entry) * d >= 0) ? 1 : 0;
-      if(risk <= 0) return;
+      if(sl > 0 && (entry - sl) * d > 0)
+        {
+         risk = MathAbs(entry - sl);    // stop still on the loss side: no partial has happened yet
+         stage = 0;
+        }
+      else
+        {
+         risk = 0.0;                    // stop already moved: leave the rest to the broker-side stop and target
+         stage = 3;
+         if(sl <= 0) Print("APEX: WARNING — position ", posId, " has no stop loss. Set one manually.");
+        }
       SaveState(posId, vol0, entry, risk, stage);
-      Print("APEX: managing an existing position with rebuilt state");
+      Print("APEX: managing an existing position with rebuilt state (stage ", stage, ")");
      }
-   if(risk <= 0) return;
+   if(risk <= 0 || stage >= 2) return;
    double px = d == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double tp1 = entry + d * g_k1 * risk, tp2 = entry + d * g_k2 * risk;
    long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -814,35 +907,35 @@ void ManagePosition()
 
    if(stage == 0 && (px - tp1) * d >= 0)
      {
-      double part = NormalizeVolume(vol0 * g_w1);
-      if(part > 0 && part < vol)
+      if(!PartialDone(posId, 1))
         {
-         if(!ClosePartial(tk, part)) { PrintFormat("APEX: TP1 partial failed %d", g_trade.ResultRetcode()); return; }
+         double part = NormalizeVolume(vol0 * g_w1);
+         if(part > 0 && part < vol)
+           {
+            if(!ClosePartial(tk, part)) { PrintFormat("APEX: TP1 partial failed %d", g_trade.ResultRetcode()); return; }
+           }
+         else Print("APEX: TP1 reached; volume too small to split — moving the stop only");
+         MarkPartial(posId, 1);
         }
-      else Print("APEX: TP1 reached; volume too small to split — moving the stop only");
-      double be = NormalizeDouble(entry, _Digits);
-      if(SelectOurPosition(tk, posId) && ((be - sl) * d > 0 || sl == 0) && MathAbs(px - be) >= minGap)
-         g_trade.PositionModify(tk, be, PositionGetDouble(POSITION_TP));
-      SaveState(posId, vol0, entry, risk, 1);
+      if(SelectOurPosition(tk, posId) && MoveStopTo(tk, d, RoundToTick(entry), px, minGap))
+         SaveState(posId, vol0, entry, risk, 1);
       return;
      }
    if(stage == 1 && (px - tp2) * d >= 0)
      {
-      if(!SelectOurPosition(tk, posId)) return;
-      double cur = PositionGetDouble(POSITION_VOLUME);
-      double part = NormalizeVolume(vol0 * g_w2);
-      if(part > 0 && part < cur)
+      if(!PartialDone(posId, 2))
         {
-         if(!ClosePartial(tk, part)) { PrintFormat("APEX: TP2 partial failed %d", g_trade.ResultRetcode()); return; }
+         if(!SelectOurPosition(tk, posId)) return;
+         double cur = PositionGetDouble(POSITION_VOLUME);
+         double part = NormalizeVolume(vol0 * g_w2);
+         if(part > 0 && part < cur)
+           {
+            if(!ClosePartial(tk, part)) { PrintFormat("APEX: TP2 partial failed %d", g_trade.ResultRetcode()); return; }
+           }
+         MarkPartial(posId, 2);
         }
-      double lock = NormalizeDouble(tp1, _Digits);
-      if(SelectOurPosition(tk, posId))
-        {
-         double curSl = PositionGetDouble(POSITION_SL);
-         if(((lock - curSl) * d > 0 || curSl == 0) && MathAbs(px - lock) >= minGap)
-            g_trade.PositionModify(tk, lock, PositionGetDouble(POSITION_TP));
-        }
-      SaveState(posId, vol0, entry, risk, 2);
+      if(SelectOurPosition(tk, posId) && MoveStopTo(tk, d, RoundToTick(tp1), px, minGap))
+         SaveState(posId, vol0, entry, risk, 2);
      }
   }
 
@@ -853,7 +946,11 @@ string Arrow(const int t) { return t == 1 ? "up" : (t == -1 ? "down" : "flat"); 
 
 void UpdatePanel(const bool halted)
   {
+   static uint lastMs = 0;
    if(!InpShowPanel) return;
+   uint nowMs = GetTickCount();
+   if(nowMs - lastMs < 1000 && lastMs != 0) return;    // at most once per second
+   lastMs = nowMs;
    string s = "APEX Fusion EA  |  " + _Symbol + " " + EnumToString(_Period) + "  |  " +
               (InpProfile == APEX_HIGHWIN ? "High Win-Rate 0.5R/2R/5R" : "Balanced 1R/3R/5R") + "\n";
    s += "Daily " + Arrow(g_last.anchor) + "   4H " + Arrow(g_last.htf) + "   score buy " + IntegerToString(g_last.scoreL) +
@@ -919,13 +1016,26 @@ void OnTick()
    bool halted = DailyHalted();
 
    datetime bar = iTime(_Symbol, _Period, 0);
+   static datetime barSeen = 0;
    if(bar != g_lastBar && bar > 0)
      {
+      if(bar != barSeen)                 // first tick of the new candle
+        {
+         barSeen = bar;
+         g_pend.active = false;
+         CleanupState();
+        }
+      int d = 0, score = 0; double stop = 0; string setup = ""; bool retry = false;
+      bool got = ComputeSignal(d, stop, setup, score, retry);
+      bool inWindow = TimeCurrent() < bar + InpEntryWindowMin * 60;
+      if(retry && inWindow)
+        {
+         if(!halted) TryEnter();
+         UpdatePanel(halted);
+         return;                         // history still loading: try this candle again on the next tick
+        }
       g_lastBar = bar;
-      g_pend.active = false;
-      CleanupState();
-      int d = 0, score = 0; double stop = 0; string setup = "";
-      if(ComputeSignal(d, stop, setup, score) && d != 0 && !halted)
+      if(got && d != 0 && !halted)
         {
          ulong tk = 0; long posId = -1;
          bool has = SelectOurPosition(tk, posId);
