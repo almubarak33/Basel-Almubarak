@@ -70,3 +70,14 @@ def final_signals(df, F, P, asset="gold"):
         return signals(df, F, P, asset)
     import final_config as v1
     return v1.signals(df, F, P, "crypto" if asset == "crypto" else "metal")
+
+
+# ───────────── v2.2 defaults (research/fix15, chosen on in-sample windows) ─────────────
+# Every timeframe: market entry at the signal close + Balanced (1R / 3R / 5R). Below 1H the execution
+# filters (4H trend, 2.5 ATR bar limit, 0.43% stop floor) stay. Out of sample below 1H no variant had an edge.
+def final_params_v22(tf, asset="gold", cost=None):
+    c = cost_for(asset) if cost is None else cost
+    if tf < 60:
+        return Params(tf_minutes=tf, htf_minutes=240, cost_pct=c, min_stop_pct=0.43, entry_mode="close",
+                      **PROFILES["Balanced"], **_asset_kw(asset))
+    return Params(tf_minutes=tf, cost_pct=c, **PROFILES["Balanced"], **_asset_kw(asset))

@@ -362,6 +362,9 @@ class Params:
     sweep_end: int = 11             # sweeps / breakouts of the Asian range count until 11:00 New York
     asia_min_pct: float = 0.15      # skip days whose Asian range is narrower / wider than this % of price
     asia_max_pct: float = 1.60
+    fill_through: float = 0.0       # limit fills need price to trade this many ATR beyond the limit (0 = touch fills)
+    stop_off: float = 0.0           # entry_mode "stop": trigger = signal bar high/low + stop_off * ATR
+    be_at: float = 0.0              # 0 = breakeven when TP1 is hit; > 0 = breakeven once price reaches be_at R
 
 
 # ───────────────────────────── features ─────────────────────────────
@@ -740,8 +743,14 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
         w = min(w1, t.openW)
         t.realized += w * k1
         t.openW -= w
-        if P.be_on:
+        if P.be_on and P.be_at <= 0:
             t.sl = max(t.sl, t.entry) if t.dir == 1 else min(t.sl, t.entry)
+
+    def late_be(t, i):
+        if P.be_on and P.be_at > 0:
+            fav = (h[i] - t.entry) if t.dir == 1 else (t.entry - l[i])
+            if fav >= P.be_at * t.risk:
+                t.sl = max(t.sl, t.entry) if t.dir == 1 else min(t.sl, t.entry)
 
     def hit_tp2(t):
         t.hit2 = True
@@ -806,13 +815,23 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
                         if cur is not None and P.max_bars > 0 and i - t.bar >= P.max_bars:
                             close(t, i, c[i], "Time")
                             cur = None
+                        if cur is not None:
+                            late_be(t, i)
         # 1b) pending pullback limit order (only exists while flat)
         if pend is not None and cur is None and i > pend["bar"]:
             pd_ = pend["dir"]
             if i - pend["bar"] > P.pb_bars or ((o[i] <= pend["stop"]) if pd_ == 1 else (o[i] >= pend["stop"])):
                 pend = None
-            elif (l[i] <= pend["limit"]) if pd_ == 1 else (h[i] >= pend["limit"]):
-                fill = min(o[i], pend["limit"]) if pd_ == 1 else max(o[i], pend["limit"])
+            elif pend.get("kind") == "stop" and not ((h[i] >= pend["limit"]) if pd_ == 1 else (l[i] <= pend["limit"])):
+                pass                                                   # stop entry not triggered yet
+            elif pend.get("kind") != "stop" and not ((l[i] <= pend["limit"] - P.fill_through * a[pend["bar"]]) if pd_ == 1
+                                                     else (h[i] >= pend["limit"] + P.fill_through * a[pend["bar"]])):
+                pass                                                   # limit not reached (or not traded through)
+            else:
+                if pend.get("kind") == "stop":
+                    fill = max(o[i], pend["limit"]) if pd_ == 1 else min(o[i], pend["limit"])
+                else:
+                    fill = min(o[i], pend["limit"]) if pd_ == 1 else max(o[i], pend["limit"])
                 risk = (fill - pend["stop"]) * pd_
                 if risk > 0:
                     tp3 = fill + pd_ * k3 * risk
@@ -844,11 +863,17 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
             if cur is not None:
                 close(cur, i, c[i], "Reverse")
                 cur = None
-            if P.entry_mode in ("pullback", "next_open"):
+            if P.entry_mode in ("pullback", "next_open", "stop"):
                 fills["signals"] += 1
                 # next_open = market order after the close (a bot): fills at the next candle's open
-                limit = (c[i] - d * P.pb_frac * dist) if P.entry_mode == "pullback" else (math.inf if d == 1 else -math.inf)
-                pend = dict(dir=d, bar=i, limit=limit, stop=c[i] - d * dist,
+                # stop = buy-stop above the signal bar high (sell-stop below its low): enters only if price follows through
+                if P.entry_mode == "pullback":
+                    limit = c[i] - d * P.pb_frac * dist
+                elif P.entry_mode == "stop":
+                    limit = (h[i] + P.stop_off * a[i]) if d == 1 else (l[i] - P.stop_off * a[i])
+                else:
+                    limit = math.inf if d == 1 else -math.inf
+                pend = dict(dir=d, bar=i, limit=limit, stop=c[i] - d * dist, kind=P.entry_mode,
                             setup=label[i] if label is not None else "")
                 break
             e = c[i]

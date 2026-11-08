@@ -7,16 +7,20 @@
 // Fusion rules (chosen on in-sample gold data, then checked out of sample — see reports/):
 //   trend setups need  anchor trend (Daily on intraday charts) + HTF trend (4H on 5m/15m/1H)
 //   + APEX score >= 5 + active session (08:00-17:00 New York, metals/FX/commodities/stocks).
-//   Below 1H a professional execution pack is added: pullback limit entry (33% of the stop
-//   distance, valid 3 bars), no signal bar wider than 2.5 ATR, and a volatility floor (stop >= 0.43%
-//   of price). Default management below 1H: Max Win-Rate (0.4R / 1.5R / 4R, 60% off at TP1).
+//   Below 1H an execution pack is added: no signal bar wider than 2.5 ATR and a volatility floor
+//   (stop >= 0.43% of price). v2.2 defaults (research/fix15): market entry at the signal close on every
+//   timeframe and Balanced management (1R / 3R / 5R, 50% off at TP1, stop to breakeven) — the best
+//   expectancy on 1H in all three gold feeds. The earlier pullback limit entry and Max Win-Rate profile
+//   remain selectable; the limit's edge came from assuming fills on a touch, and it skipped the strongest moves.
+//   Below 1H no variant tested (4 entries × 5 filter sets × 7 target plans) was profitable on gold
+//   Jun-Nov 2026; the panel says so. 1H is the timeframe with a tested edge.
 //   Reversal setups (sweep, divergence, zone rebound) are available but off by default: they lost
 //   money in every gold test.
 // Non-repainting: entries are evaluated on confirmed bars only; HTF / anchor data use the previous
 // completed bar (expression[1] + lookahead_on). Pivots, zones and trendlines are drawn back at the
 // pivot bar once confirmed; the regression channel is recalculated on the last bar.
-// The performance panel is an OHLC simulation (entry at the signal close, or at the limit fill below
-// 1H; stop-first when a bar touches both stop and target; round-trip cost subtracted). Not broker execution.
+// The performance panel is an OHLC simulation (entry at the signal close, or at the limit fill when the
+// pullback entry is chosen; stop-first when a bar touches both stop and target; round-trip cost subtracted). Not broker execution.
 //@version=6
 indicator("APEX Fusion Pro", shorttitle = "APEX FUSION", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500, max_bars_back = 1000)
 
@@ -31,7 +35,7 @@ const string G_SES  = "⑤b Market sessions (display only)"
 const string G_PNL  = "⑥ Performance panel"
 const string G_SIZE = "⑦ Cost & position sizing"
 
-const string PROF_AUTO = "Auto (below 1H: Max Win-Rate · 1H and above: High Win-Rate)"
+const string PROF_AUTO = "Auto (Balanced 1R / 3R / 5R on every timeframe)"
 const string PROF_MW  = "Max Win-Rate (0.4R / 1.5R / 4R)"
 const string PROF_BAL = "Balanced Pro (1R / 3R / 5R)"
 const string PROF_HW  = "High Win-Rate (0.5R / 2R / 5R)"
@@ -55,8 +59,9 @@ anchorMode  = input.string("Auto", "Anchor timeframe", options = ["Auto", "Custo
 anchorCustom = input.timeframe("D", "", group = G_SIG, inline = "anc")
 reverseOn   = input.bool(true, "Opposite signal reverses an open trade", group = G_SIG)
 
-ltfPack     = input.bool(true, "Professional execution pack below 1H", group = G_LTF, tooltip = "On charts below 1H: enter with a limit order on a pullback instead of chasing the close, skip news/exhaustion candles and require a minimum volatility. In the gold tests this raised the 5m/15m win rate from ~55-67% to ~70-82%.")
-pbFrac      = input.float(0.33, "Pullback entry: limit at × stop distance", minval = 0.05, maxval = 0.9, step = 0.01, group = G_LTF, inline = "pb", tooltip = "After a signal, a limit order is placed this fraction of the stop distance back toward the stop. Risk and targets are measured from the fill. Signals whose limit is not filled are marked ✗ and are not trades.")
+ltfPack     = input.bool(true, "Execution filters below 1H", group = G_LTF, tooltip = "On charts below 1H: use 4H for the HTF trend, skip news/exhaustion candles (wider than the ATR limit below) and require a minimum volatility (stop floor).")
+ltfEntry    = input.string("Market (signal close)", "Entry below 1H", options = ["Market (signal close)", "Pullback limit"], group = G_LTF, tooltip = "Market: enter at the close of the signal candle (default). Pullback limit: wait for a retracement of the fraction below; it lifts the win rate only if every touch fills, and it misses the strongest moves (marked ✗). With realistic fills it was not better than market entry in the gold tests.")
+pbFrac      = input.float(0.33, "Pullback limit at × stop distance", minval = 0.05, maxval = 0.9, step = 0.01, group = G_LTF, inline = "pb", tooltip = "After a signal, a limit order is placed this fraction of the stop distance back toward the stop. Risk and targets are measured from the fill. Signals whose limit is not filled are marked ✗ and are not trades.")
 pbBars      = input.int(3, "valid bars", minval = 1, maxval = 20, group = G_LTF, inline = "pb")
 maxBarAtr   = input.float(2.5, "Skip signal bars wider than × ATR", minval = 0.5, step = 0.1, group = G_LTF)
 minStopPct  = input.float(0.43, "Volatility floor: stop must be ≥ % of price", minval = 0, step = 0.01, group = G_LTF, tooltip = "Signals with a tighter stop come from quiet, noisy markets; they lowered results in every in-sample test.")
@@ -88,7 +93,7 @@ orTzIn      = input.string("America/New_York", "Opening-range timezone (Custom)"
 orMin       = input.int(15, "Opening-range length (minutes)", minval = 1, group = G_SET)
 bounceWindow = input.int(3, "Rebound confirmation window (bars)", minval = 1, maxval = 10, group = G_SET)
 
-profileIn   = input.string(PROF_AUTO, "Trade-management profile", options = [PROF_AUTO, PROF_MW, PROF_HW, PROF_BAL, PROF_HP, PROF_RUN, PROF_CUS], group = G_RISK, tooltip = "Auto: Max Win-Rate below 1H, High Win-Rate on 1H and above (the combinations that kept both a ~70% win rate and a positive expectancy in the gold tests). Max Win-Rate: TP1 0.4R closes 60% and moves the stop to breakeven, TP2 1.5R closes 20%, runner to 4R. Balanced Pro: TP1 1R closes 50% and moves the stop to breakeven, TP2 3R closes 25%, runner to 5R. High Win-Rate: same with TP1 0.5R / TP2 2R — more winning trades, lower expectancy. A high hit rate alone does not mean profit; read Net R and PF in the panel.")
+profileIn   = input.string(PROF_AUTO, "Trade-management profile", options = [PROF_AUTO, PROF_MW, PROF_HW, PROF_BAL, PROF_HP, PROF_RUN, PROF_CUS], group = G_RISK, tooltip = "Auto: Balanced Pro on every timeframe — the highest expectancy on gold 1H in all three test feeds (PAXG, COMEX, XAUUSDT) in both halves of the data, at a ~60% win rate. Max Win-Rate: TP1 0.4R closes 60% and moves the stop to breakeven, TP2 1.5R closes 20%, runner to 4R. Balanced Pro: TP1 1R closes 50% and moves the stop to breakeven, TP2 3R closes 25%, runner to 5R. High Win-Rate: same with TP1 0.5R / TP2 2R — more winning trades, lower expectancy. A high hit rate alone does not mean profit; read Net R and PF in the panel.")
 swingLook   = input.int(10, "Stop: swing lookback", minval = 2, group = G_RISK, inline = "sl")
 slBuf       = input.float(0.25, "buffer×ATR", minval = 0, step = 0.05, group = G_RISK, inline = "sl")
 slMinAtr    = input.float(0.8, "Stop distance min×ATR", minval = 0.1, step = 0.1, group = G_RISK, inline = "sl2")
@@ -457,7 +462,7 @@ bool inTradeSess = not sessApplies or inSessRaw
 bool baseL = (not useAnchor or anchorTrend == 1) and inTradeSess
 bool baseS = (not useAnchor or anchorTrend == -1) and inTradeSess
 bool ltfOn = ltfPack and timeframe.isintraday and timeframe.in_seconds() < 3600
-bool usePullback = ltfOn
+bool usePullback = ltfOn and ltfEntry == "Pullback limit"
 bool okBar = not ltfOn or (high - low) <= maxBarAtr * atr
 bool trendGateL = baseL and scoreL >= minScore and (not useHtfGate or htfTrend == 1) and okBar
 bool trendGateS = baseS and scoreS >= minScore and (not useHtfGate or htfTrend == -1) and okBar
@@ -493,7 +498,7 @@ float chandL1 = chandL[1]
 float chandS1 = chandS[1]
 
 // Management profile
-string profile = profileIn == PROF_AUTO ? (timeframe.in_seconds() >= 3600 ? PROF_HW : ltfPack ? PROF_MW : PROF_BAL) : profileIn
+string profile = profileIn == PROF_AUTO ? PROF_BAL : profileIn
 float k1 = profile == PROF_MW ? 0.4 : profile == PROF_BAL ? 1.0 : profile == PROF_HW ? 0.5 : profile == PROF_HP ? 0.3 : profile == PROF_RUN ? 1.0 : cTp1
 float k2 = profile == PROF_MW ? 1.5 : profile == PROF_BAL ? 3.0 : profile == PROF_HW ? 2.0 : profile == PROF_HP ? 1.5 : profile == PROF_RUN ? 2.0 : cTp2
 float k3 = profile == PROF_MW ? 4.0 : profile == PROF_BAL ? 5.0 : profile == PROF_HW ? 5.0 : profile == PROF_HP ? 4.0 : profile == PROF_RUN ? 8.0 : cTp3
@@ -521,6 +526,7 @@ type Trade
     bool   hit3 = false
     float  realized = 0.0
     float  openW = 1.0
+    float  exitPx = na
     line   lnEntry
     line   lnSl
     line   lnTp1
@@ -649,6 +655,7 @@ setupId(string s) =>
     id
 
 closeTrade(Trade t, float px, string reason) =>
+    t.exitPx := px
     t.realized += t.openW * (px - t.entry) * t.dir / t.risk
     t.openW := 0.0
     float cR = costPct / 100 * t.entry / t.risk
@@ -1120,7 +1127,9 @@ if barstate.islast and showPanel
     string state = na(cur) and not na(pend) ? (pend.dir == 1 ? "BUY LIMIT " : "SELL LIMIT ") + fmt(pend.limit) + " (" + pend.setup + ")" : na(cur) ? tr("Flat — waiting for a setup", "لا صفقة — بانتظار إشارة") : (cur.dir == 1 ? "BUY " : "SELL ") + cur.setup + " @ " + fmt(cur.entry) + (cur.hit1 ? " ✅" : "")
     cellRow(12, tr("Now", "الآن"), state, na(cur) ? neutCol : cur.dir == 1 ? buyCol : sellCol)
     cellRow(13, tr("Filters", "الفلاتر"), (useAnchor ? anchorTf + (anchorTrend == 1 ? "↑ " : anchorTrend == -1 ? "↓ " : "→ ") : "") + (useHtfGate ? htf + (htfTrend == 1 ? "↑ " : htfTrend == -1 ? "↓ " : "→ ") : "") + (sessApplies ? (inSessRaw ? tr("session ✓", "الجلسة ✓") : tr("session ✗", "الجلسة ✗")) : ""), white)
-    cellRow(14, tr("Tested on", "مُختبر على"), isGold ? tr("Gold ✓ (5m / 15m / 1H)", "الذهب ✓ (5د / 15د / ساعة)") : tr("⚠ Not profitable in tests on silver, crypto, stocks", "⚠ غير رابح في اختبارات الفضة والكريبتو والأسهم"), isGold ? tpCol : slCol)
+    bool ltfChart = timeframe.isintraday and timeframe.in_seconds() < 3600
+    string testedTxt = not isGold ? tr("⚠ Not profitable in tests on silver, crypto, stocks", "⚠ غير رابح في اختبارات الفضة والكريبتو والأسهم") : ltfChart ? tr("⚠ Gold below 1H: no edge in 2026 tests — use 1H", "⚠ الذهب تحت الساعة: بلا ميزة في اختبارات 2026 — استخدم الساعة") : tr("Gold ✓ 1H (PAXG · COMEX · XAUUSDT)", "الذهب ✓ ساعة (PAXG · COMEX · XAUUSDT)")
+    cellRow(14, tr("Tested on", "مُختبر على"), testedTxt, isGold and not ltfChart ? tpCol : slCol)
     if showSetRows
         int r = 15
         for i = 0 to N_SETUPS - 1
@@ -1130,9 +1139,9 @@ if barstate.islast and showPanel
                 r += 1
 
 // ───────────────────────────── Alerts ─────────────────────────────
-alertcondition(newLong, "APEX FUSION BUY", "APEX FUSION BUY signal {{ticker}} {{interval}} @ {{close}} (below 1H: limit order placed)")
+alertcondition(newLong, "APEX FUSION BUY", "APEX FUSION BUY signal {{ticker}} {{interval}} @ {{close}} (a limit order when the pullback entry is selected)")
 alertcondition(evFill, "APEX FUSION entry filled", "APEX FUSION limit entry filled {{ticker}} {{interval}}")
-alertcondition(newShort, "APEX FUSION SELL", "APEX FUSION SELL signal {{ticker}} {{interval}} @ {{close}} (below 1H: limit order placed)")
+alertcondition(newShort, "APEX FUSION SELL", "APEX FUSION SELL signal {{ticker}} {{interval}} @ {{close}} (a limit order when the pullback entry is selected)")
 alertcondition(evCancel, "APEX FUSION limit cancelled", "APEX FUSION pending limit entry cancelled {{ticker}} {{interval}} — cancel the order at your broker")
 alertcondition(evTp1 or evTp2 or evTp3, "APEX FUSION target hit", "APEX FUSION target hit {{ticker}} {{interval}}")
 alertcondition(evSl, "APEX FUSION stop hit", "APEX FUSION stop hit {{ticker}} {{interval}}")
@@ -1150,5 +1159,17 @@ if evFill
 if (newLong or newShort) and na(pend) and not na(cur)
     alert('{"signal":"' + (newLong ? "BUY" : "SELL") + '","type":"market","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","setup":"' + cur.setup + '","score":' + str.tostring(cur.score) + ',"entry":' + fmt(cur.entry) + ',"sl":' + fmt(cur.sl) + ',"tp1":' + fmt(cur.tp1) + ',"tp2":' + fmt(cur.tp2) + ',"tp3":' + (na(cur.tp3) ? "null" : fmt(cur.tp3)) + '}', alert.freq_once_per_bar_close)
 if evTp1 or evTp2 or evTp3 or evSl or evExit
-    string evName = evSl ? "STOP" : evExit ? "EXIT" : evTp3 ? "TP3" : evTp2 ? "TP2" : "TP1"
-    alert('{"event":"' + evName + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","price":' + fmt(close) + (na(lastR) ? "" : ',"R":' + str.tostring(lastR, "#.###")) + '}', alert.freq_once_per_bar_close)
+    array<string> evs = array.new<string>()
+    if evTp1
+        evs.push("TP1")
+    if evTp2
+        evs.push("TP2")
+    if evTp3
+        evs.push("TP3")
+    if evSl
+        evs.push("STOP")
+    if evExit
+        evs.push("EXIT")
+    // closed this bar: report the real exit price of that trade, otherwise the bar close
+    float evPx = not na(lastR) and closedTrades.size() > 0 ? closedTrades.last().exitPx : close
+    alert('{"event":"' + evs.join("+") + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","price":' + fmt(evPx) + (na(lastR) ? "" : ',"R":' + str.tostring(lastR, "#.###")) + '}', alert.freq_once_per_bar_close)
