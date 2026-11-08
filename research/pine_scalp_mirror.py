@@ -58,7 +58,7 @@ def simulate(df: pd.DataFrame, L, S, a):
             pend = None
             cur = dict(d=d, sl=sl, tp=tp, risk=risk, fill=fill, bar=i)
             kind = None
-            if (d == 1 and (entry <= sl or entry >= tp)) or (d == -1 and (entry >= sl or entry <= tp)):
+            if (d == 1 and (fill <= sl or fill >= tp)) or (d == -1 and (fill >= sl or fill <= tp)):
                 kind, px = "NOFILL", None
             elif (l[i] <= sl) if d == 1 else (h[i] >= sl):
                 kind, px = "SL", sl

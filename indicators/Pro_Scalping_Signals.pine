@@ -12,6 +12,8 @@
 // HISTORICAL TEST (research/bot_backtest.py, Binance USDT-M futures 5m, 30 pairs, Jan 2025-Oct 2026):
 // 20,719 signals, 33% win rate, -0.31R per trade after 0.06% costs per side (-0.006R with no costs).
 // The panel recomputes the statistics on this chart so you can check it on your own symbol.
+// Caveat: the bot rounds prices to 6 decimals, so on coins priced near 1e-5 (PEPE, SHIB) its numbers differ slightly.
+// Alerts: enable either the alertcondition() alerts or the "Any alert() function call" alert, not both (duplicates).
 //@version=6
 indicator("Pro Scalping Signals", shorttitle = "PRO SCALP", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500)
 
@@ -31,7 +33,7 @@ rsiShortMax = input.float(55, "–", group = G_SIG, inline = "rs")
 volMin      = input.float(1.2, "Volume ≥ × 20-candle average", minval = 0, step = 0.1, group = G_SIG, tooltip = "Symbols without volume data never signal (the strategy needs volume).")
 slMult      = input.float(1.5, "Stop = ATR ×", minval = 0.1, step = 0.1, group = G_SIG, inline = "sltp")
 tpMult      = input.float(3.0, "Target = ATR ×", minval = 0.1, step = 0.1, group = G_SIG, inline = "sltp")
-minRR       = input.float(1.8, "Minimum reward:risk", minval = 0.1, step = 0.1, group = G_SIG)
+minRR       = input.float(1.8, "Minimum reward:risk", minval = 0.1, step = 0.1, group = G_SIG, tooltip = "Same as the bot's min_rr. With the default 1.5 / 3 ATR the ratio is 2, so it never blocks; if target/stop is set below this value, no signals are drawn.")
 dirMode     = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_SIG)
 
 feePct      = input.float(0.05, "Fee per side %", minval = 0, step = 0.01, group = G_COST, tooltip = "Binance USDT-M taker fee is 0.05% at the base tier. Charged on entry and exit.")
@@ -118,6 +120,7 @@ type Stats
     int   win    = 0
     int   tp     = 0
     int   sl     = 0
+    int   nf     = 0
     int   nL     = 0
     int   nS     = 0
     float gross  = 0.0
@@ -166,6 +169,7 @@ closeTrade(Trade t, float px, string kind) =>
     st.win += R > 0 ? 1 : 0
     st.tp += kind == "TP" ? 1 : 0
     st.sl += kind == "SL" or kind == "GAP" ? 1 : 0
+    st.nf += kind == "NOFILL" ? 1 : 0
     st.nL += t.dir == 1 ? 1 : 0
     st.nS += t.dir == -1 ? 1 : 0
     st.gross += R > 0 ? R : 0
@@ -205,14 +209,17 @@ openTrade(Pending p) =>
 // 1) The pending signal fills at this candle's open (like the bot's market order after the close).
 bool evTp = false
 bool evSl = false
+bool evNo = false
 float lastR = na
 if barstate.isconfirmed and not na(pend) and bar_index > pend.bar
     cur := openTrade(pend)
     pend := na
     int d = cur.dir
-    if (d == 1 and cur.entry <= cur.sl) or (d == -1 and cur.entry >= cur.sl) or (d == 1 and cur.entry >= cur.tp) or (d == -1 and cur.entry <= cur.tp)
+    float ef = cur.entryFill
+    if (d == 1 and ef <= cur.sl) or (d == -1 and ef >= cur.sl) or (d == 1 and ef >= cur.tp) or (d == -1 and ef <= cur.tp)
         // Filled beyond the stop or the target: the fixed bot exits at once (only costs are lost).
         lastR := closeTrade(cur, cur.entry, "NOFILL")
+        evNo := true
         cur := na
     else if (d == 1 ? low <= cur.sl : high >= cur.sl)
         lastR := closeTrade(cur, cur.sl, "SL")
@@ -298,14 +305,14 @@ if barstate.islast and showPanel
     float n = st.n
     cellRow(1, "Closed trades", str.tostring(st.n) + "  (" + str.tostring(st.nL) + " B / " + str.tostring(st.nS) + " S)", white)
     cellRow(2, "Win rate (net > 0)", n > 0 ? pct(st.win / n) : "—", white)
-    cellRow(3, "Target / stop hit", n > 0 ? pct(st.tp / n) + " / " + pct(st.sl / n) : "—", white)
+    cellRow(3, "Target / stop / instant exit", n > 0 ? pct(st.tp / n) + " / " + pct(st.sl / n) + " / " + pct(st.nf / n) : "—", white)
     float pf = st.loss > 0 ? st.gross / st.loss : na
-    cellRow(4, "Profit factor", na(pf) ? "—" : str.tostring(pf, "#.##"), na(pf) or pf >= 1 ? tpCol : slCol)
+    cellRow(4, "Profit factor", na(pf) ? (st.gross > 0 ? "∞" : "—") : str.tostring(pf, "#.##"), na(pf) or pf >= 1 ? tpCol : slCol)
     cellRow(5, "Net / avg per trade", n > 0 ? fmtR(st.net) + " / " + fmtR(st.net / n) : "—", st.net >= 0 ? tpCol : slCol)
-    cellRow(6, "Max drawdown", "-" + str.tostring(st.maxDd, "#.##") + "R", white)
+    cellRow(6, "Max drawdown", st.maxDd > 0 ? "-" + str.tostring(st.maxDd, "#.##") + "R" : "0R", white)
     cellRow(7, "Costs per side", str.tostring(feePct, "#.###") + "% fee + " + str.tostring(slipPct, "#.###") + "% slip", white)
     cellRow(8, "Since", na(st.firstTime) ? "—" : str.format_time(st.firstTime, "yyyy-MM-dd", syminfo.timezone), white)
-    string state = not na(pend) ? (pend.dir == 1 ? "BUY" : "SELL") + " at next open" : na(cur) ? "Flat — waiting for 5/5" : (cur.dir == 1 ? "BUY @ " : "SELL @ ") + fmt(cur.entry)
+    string state = not na(pend) ? (pend.dir == 1 ? "BUY" : "SELL") + " pending (fills at next candle open)" : na(cur) ? "Flat — waiting for 5/5" : (cur.dir == 1 ? "BUY @ " : "SELL @ ") + fmt(cur.entry)
     cellRow(9, "Now", state, na(cur) and na(pend) ? color.new(#8a8f98, 0) : (not na(cur) ? cur.dir : pend.dir) == 1 ? buyCol : sellCol)
     cellRow(10, "⚠ Backtest 30 pairs, 22 months", "33% win, -0.31R/trade after costs", slCol)
 
@@ -314,7 +321,8 @@ alertcondition(newLong, "PRO SCALP BUY", "PRO SCALP BUY signal {{ticker}} {{inte
 alertcondition(newShort, "PRO SCALP SELL", "PRO SCALP SELL signal {{ticker}} {{interval}} close {{close}}")
 alertcondition(evTp, "PRO SCALP target hit", "PRO SCALP target hit {{ticker}} {{interval}}")
 alertcondition(evSl, "PRO SCALP stop hit", "PRO SCALP stop hit {{ticker}} {{interval}}")
+alertcondition(evNo, "PRO SCALP exit at once", "PRO SCALP opened beyond its stop or target and exits at once {{ticker}} {{interval}}")
 if (newLong or newShort) and not na(pend)
     alert('{"signal":"' + (newLong ? "BUY" : "SELL") + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","close":' + fmt(pend.sigClose) + ',"sl":' + fmt(pend.sl) + ',"tp":' + fmt(pend.tp) + ',"entry":"next_open"}', alert.freq_once_per_bar_close)
-if evTp or evSl
-    alert('{"event":"' + (evTp ? "TP" : "SL") + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '"' + (na(lastR) ? "" : ',"R":' + str.tostring(lastR, "#.###")) + '}', alert.freq_once_per_bar_close)
+if evTp or evSl or evNo
+    alert('{"event":"' + (evTp ? "TP" : evSl ? "SL" : "EXIT") + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '"' + (na(lastR) ? "" : ',"R":' + str.tostring(lastR, "#.###")) + '}', alert.freq_once_per_bar_close)
