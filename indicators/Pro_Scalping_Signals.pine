@@ -1,0 +1,320 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Pro Scalping Signals — the pro-scalping-bot strategy as a chart indicator (draws signals, places no orders).
+// Strategy (same as pro-scalping-bot/src/strategy.py), all five on a closed candle:
+//   1. EMA trend: 9 > 21 > 50 (long) / 9 < 21 < 50 (short)
+//   2. Fresh EMA 9/21 cross on this candle
+//   3. RSI(14) in 45-70 (long) / 30-55 (short)
+//   4. MACD(12,26,9) histogram above 0 and rising (long) / below 0 and falling (short)
+//   5. Volume >= 1.2 x its 20-candle average
+//   Stop = close -/+ 1.5 ATR(14); target = close +/- 3 ATR(14) (reward:risk 2).
+// Trades are simulated like the bot: market entry at the next candle's open, stop and target at the
+// signal's prices, stop first when one candle touches both, one trade at a time.
+// HISTORICAL TEST (research/bot_backtest.py, Binance USDT-M futures 5m, 30 pairs, Jan 2025-Oct 2026):
+// 20,719 signals, 33% win rate, -0.31R per trade after 0.06% costs per side (-0.006R with no costs).
+// The panel recomputes the statistics on this chart so you can check it on your own symbol.
+//@version=6
+indicator("Pro Scalping Signals", shorttitle = "PRO SCALP", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500)
+
+// ───────────────────────────── Inputs ─────────────────────────────
+const string G_SIG  = "① Signal (bot strategy)"
+const string G_COST = "② Costs for the statistics"
+const string G_VIS  = "③ Trade drawing"
+const string G_PNL  = "④ Performance panel"
+
+emaFastLen  = input.int(9, "EMA fast", minval = 1, group = G_SIG, inline = "ema")
+emaMidLen   = input.int(21, "mid", minval = 1, group = G_SIG, inline = "ema")
+emaSlowLen  = input.int(50, "slow", minval = 1, group = G_SIG, inline = "ema")
+rsiLongMin  = input.float(45, "RSI long zone", group = G_SIG, inline = "rl")
+rsiLongMax  = input.float(70, "–", group = G_SIG, inline = "rl")
+rsiShortMin = input.float(30, "RSI short zone", group = G_SIG, inline = "rs")
+rsiShortMax = input.float(55, "–", group = G_SIG, inline = "rs")
+volMin      = input.float(1.2, "Volume ≥ × 20-candle average", minval = 0, step = 0.1, group = G_SIG, tooltip = "Symbols without volume data never signal (the strategy needs volume).")
+slMult      = input.float(1.5, "Stop = ATR ×", minval = 0.1, step = 0.1, group = G_SIG, inline = "sltp")
+tpMult      = input.float(3.0, "Target = ATR ×", minval = 0.1, step = 0.1, group = G_SIG, inline = "sltp")
+minRR       = input.float(1.8, "Minimum reward:risk", minval = 0.1, step = 0.1, group = G_SIG)
+dirMode     = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_SIG)
+
+feePct      = input.float(0.05, "Fee per side %", minval = 0, step = 0.01, group = G_COST, tooltip = "Binance USDT-M taker fee is 0.05% at the base tier. Charged on entry and exit.")
+slipPct     = input.float(0.01, "Slippage per side %", minval = 0, step = 0.01, group = G_COST, tooltip = "Market entry and stop/target market exits.")
+acct        = input.float(10000, "Account size (for the size tooltip)", minval = 0, group = G_COST, inline = "acc")
+riskPct     = input.float(1.0, "Risk %", minval = 0.01, step = 0.1, group = G_COST, inline = "acc")
+
+showSig     = input.bool(true, "BUY / SELL labels", group = G_VIS)
+showLevels  = input.bool(true, "Entry / stop / target lines", group = G_VIS)
+showBoxes   = input.bool(true, "Risk / reward zones", group = G_VIS)
+showTags    = input.bool(true, "✅ TP / ❌ SL tags", group = G_VIS)
+showLive    = input.bool(true, "Live price labels for the open trade", group = G_VIS)
+showEmas    = input.bool(true, "EMA 9 / 21 / 50", group = G_VIS)
+keepTrades  = input.int(10, "Keep last N closed trades on the chart", minval = 1, maxval = 40, group = G_VIS)
+projBars    = input.int(5, "Project the open trade N bars ahead", minval = 1, maxval = 50, group = G_VIS)
+entryCol    = input.color(#2196f3, "Entry", group = G_VIS, inline = "tc")
+slCol       = input.color(#f23645, "Stop", group = G_VIS, inline = "tc")
+tpCol       = input.color(#22ab94, "Target", group = G_VIS, inline = "tc")
+buyCol      = input.color(#089981, "BUY", group = G_VIS, inline = "lc")
+sellCol     = input.color(#e0434f, "SELL", group = G_VIS, inline = "lc")
+
+showPanel   = input.bool(true, "Show performance panel", group = G_PNL)
+panelPos    = input.string("Top right", "Position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = G_PNL)
+panelSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_PNL)
+
+// ───────────────────────────── Helpers ─────────────────────────────
+if barstate.isfirst and not chart.is_standard
+    runtime.error("Pro Scalping Signals needs a standard candle/bar chart (not Heikin Ashi, Renko or other synthetic charts).")
+fmt(float v) => str.tostring(v, format.mintick)
+fmtR(float v) => (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + "R"
+pct(float v) => str.tostring(v * 100, "#.#") + "%"
+float fee = feePct / 100
+float slip = slipPct / 100
+
+// ───────────────────────────── Indicators (same formulas as indicators.py) ─────────────────────────────
+float ema9  = ta.ema(close, emaFastLen)
+float ema21 = ta.ema(close, emaMidLen)
+float ema50 = ta.ema(close, emaSlowLen)
+// RSI with Wilder smoothing; like the bot, RSI is 50 when there were no down moves.
+float chg   = ta.change(close)
+float avgUp = ta.rma(math.max(nz(chg), 0), 14)
+float avgDn = ta.rma(math.max(-nz(chg), 0), 14)
+float rsiV  = avgDn == 0 ? 50.0 : 100 - 100 / (1 + avgUp / avgDn)
+[macdLine, macdSig, hist] = ta.macd(close, 12, 26, 9)
+float atrV   = ta.atr(14)
+float volAvg = ta.sma(volume, 20)
+float volRatio = volAvg > 0 ? volume / volAvg : na
+
+// ───────────────────────────── Signal (strategy.py generate) ─────────────────────────────
+bool volOk = not na(volRatio) and volRatio >= volMin
+bool rrOk = slMult > 0 and tpMult / slMult >= minRR
+bool longCond  = ema9 > ema21 and ema21 > ema50 and ema9[1] < ema21[1] and rsiV >= rsiLongMin and rsiV <= rsiLongMax and hist > 0 and hist > hist[1] and volOk
+bool shortCond = ema9 < ema21 and ema21 < ema50 and ema9[1] > ema21[1] and rsiV >= rsiShortMin and rsiV <= rsiShortMax and hist < 0 and hist < hist[1] and volOk
+bool warm = bar_index >= 150 and not na(atrV) and atrV > 0
+
+// ───────────────────────────── Trade model ─────────────────────────────
+type Trade
+    int   dir
+    int   sigBar
+    int   entryBar
+    float entry
+    float entryFill
+    float sl
+    float tp
+    float planRisk
+    line  lnEntry
+    line  lnSl
+    line  lnTp
+    box   bxRisk
+    box   bxReward
+    label lbSig
+    label lbOut
+
+type Pending
+    int   dir
+    int   bar
+    float sigClose
+    float sl
+    float tp
+    label lb
+
+type Stats
+    int   n      = 0
+    int   win    = 0
+    int   tp     = 0
+    int   sl     = 0
+    int   nL     = 0
+    int   nS     = 0
+    float gross  = 0.0
+    float loss   = 0.0
+    float net    = 0.0
+    float peak   = 0.0
+    float maxDd  = 0.0
+    int   firstTime = na
+
+var Trade cur = na
+var Pending pend = na
+var Stats st = Stats.new()
+var array<Trade> closedTrades = array.new<Trade>()
+
+deleteVisuals(Trade t) =>
+    line.delete(t.lnEntry)
+    line.delete(t.lnSl)
+    line.delete(t.lnTp)
+    box.delete(t.bxRisk)
+    box.delete(t.bxReward)
+    label.delete(t.lbSig)
+    label.delete(t.lbOut)
+
+extendTrade(Trade t, int x) =>
+    if not na(t.lnEntry)
+        t.lnEntry.set_x2(x)
+        t.lnSl.set_x2(x)
+        t.lnTp.set_x2(x)
+    if not na(t.bxRisk)
+        t.bxRisk.set_right(x)
+        t.bxReward.set_right(x)
+
+sizeText(float planRisk) =>
+    float qty = planRisk > 0 ? acct * riskPct / 100 / (planRisk * syminfo.pointvalue) : na
+    "Size @" + str.tostring(riskPct) + "%: " + str.tostring(qty, "#.####")
+
+signalTip(int d, float c, float sl, float tp) =>
+    (d == 1 ? "BUY" : "SELL") + " signal (entry at next candle open)\nClose " + fmt(c) + "\nStop " + fmt(sl) + " (" + str.tostring(slMult) + " ATR)\nTarget " + fmt(tp) + " (" + str.tostring(tpMult) + " ATR)\n" + sizeText(math.abs(c - sl))
+
+// Close a trade at a price; kind: "TP", "SL", "GAP", "NOFILL".
+closeTrade(Trade t, float px, string kind) =>
+    float entryFill = t.entryFill
+    float exitFill = kind == "NOFILL" ? entryFill : px * (1 - t.dir * slip)
+    float R = ((exitFill - entryFill) * t.dir - fee * (entryFill + exitFill)) / t.planRisk
+    st.n += 1
+    st.win += R > 0 ? 1 : 0
+    st.tp += kind == "TP" ? 1 : 0
+    st.sl += kind == "SL" or kind == "GAP" ? 1 : 0
+    st.nL += t.dir == 1 ? 1 : 0
+    st.nS += t.dir == -1 ? 1 : 0
+    st.gross += R > 0 ? R : 0
+    st.loss += R < 0 ? -R : 0
+    st.net += R
+    st.peak := math.max(st.peak, st.net)
+    st.maxDd := math.max(st.maxDd, st.peak - st.net)
+    if na(st.firstTime)
+        st.firstTime := time
+    extendTrade(t, bar_index)
+    if showTags
+        string txt = kind == "TP" ? "✅ TP" : kind == "NOFILL" ? "⇄ EXIT" : "❌ SL"
+        color c = R > 0 ? tpCol : slCol
+        t.lbOut := label.new(bar_index, px, txt, style = label.style_label_left, color = c, textcolor = color.white, size = size.small, tooltip = kind + " @ " + fmt(px) + " | " + fmtR(R))
+    if not na(t.lnTp) and kind == "TP"
+        t.lnTp.set_width(2)
+    closedTrades.push(t)
+    while closedTrades.size() > keepTrades
+        deleteVisuals(closedTrades.shift())
+    R
+
+openTrade(Pending p) =>
+    float e = open
+    Trade t = Trade.new(p.dir, p.bar, bar_index, e, e * (1 + p.dir * slip), p.sl, p.tp, math.abs(p.sigClose - p.sl))
+    int x0 = p.bar
+    int xr = bar_index + projBars
+    if showBoxes
+        t.bxRisk := box.new(x0, math.max(e, t.sl), xr, math.min(e, t.sl), border_color = color.new(slCol, 100), bgcolor = color.new(slCol, 84))
+        t.bxReward := box.new(x0, math.max(e, t.tp), xr, math.min(e, t.tp), border_color = color.new(tpCol, 100), bgcolor = color.new(tpCol, 86))
+    if showLevels
+        t.lnTp := line.new(x0, t.tp, xr, t.tp, color = tpCol, width = 1)
+        t.lnSl := line.new(x0, t.sl, xr, t.sl, color = slCol, width = 2)
+        t.lnEntry := line.new(x0, e, xr, e, color = entryCol, width = 2)
+    t.lbSig := p.lb
+    t
+
+// 1) The pending signal fills at this candle's open (like the bot's market order after the close).
+bool evTp = false
+bool evSl = false
+float lastR = na
+if barstate.isconfirmed and not na(pend) and bar_index > pend.bar
+    cur := openTrade(pend)
+    pend := na
+    int d = cur.dir
+    if (d == 1 and cur.entry <= cur.sl) or (d == -1 and cur.entry >= cur.sl) or (d == 1 and cur.entry >= cur.tp) or (d == -1 and cur.entry <= cur.tp)
+        // Filled beyond the stop or the target: the fixed bot exits at once (only costs are lost).
+        lastR := closeTrade(cur, cur.entry, "NOFILL")
+        cur := na
+    else if (d == 1 ? low <= cur.sl : high >= cur.sl)
+        lastR := closeTrade(cur, cur.sl, "SL")
+        evSl := true
+        cur := na
+    else if (d == 1 ? high >= cur.tp : low <= cur.tp)
+        lastR := closeTrade(cur, cur.tp, "TP")
+        evTp := true
+        cur := na
+// 2) Manage the open trade on later candles: gap through the stop, then stop first, then target.
+else if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
+    int d = cur.dir
+    if (d == 1 and open <= cur.sl) or (d == -1 and open >= cur.sl)
+        lastR := closeTrade(cur, open, "GAP")
+        evSl := true
+        cur := na
+    else if (d == 1 ? low <= cur.sl : high >= cur.sl)
+        lastR := closeTrade(cur, cur.sl, "SL")
+        evSl := true
+        cur := na
+    else if (d == 1 ? high >= cur.tp : low <= cur.tp)
+        lastR := closeTrade(cur, cur.tp, "TP")
+        evTp := true
+        cur := na
+if not na(cur)
+    extendTrade(cur, bar_index + projBars)
+
+// 3) New signal on the closed candle (one trade at a time, like the bot per symbol).
+bool newLong = false
+bool newShort = false
+if barstate.isconfirmed and warm and rrOk and na(cur) and na(pend)
+    bool goL = longCond and dirMode != "Short only"
+    bool goS = shortCond and dirMode != "Long only" and not goL
+    if goL or goS
+        int d = goL ? 1 : -1
+        float sl = close - d * slMult * atrV
+        float tp = close + d * tpMult * atrV
+        label lb = showSig ? label.new(bar_index, sl, d == 1 ? "BUY" : "SELL", style = d == 1 ? label.style_label_up : label.style_label_down, color = d == 1 ? buyCol : sellCol, textcolor = color.white, size = size.small, tooltip = signalTip(d, close, sl, tp)) : na
+        pend := Pending.new(d, bar_index, close, sl, tp, lb)
+        newLong := goL
+        newShort := goS
+
+// ───────────────────────────── Live levels, plots ─────────────────────────────
+var array<label> liveLabels = array.new<label>()
+if barstate.islast
+    while liveLabels.size() > 0
+        label.delete(liveLabels.pop())
+    if showLive and not na(cur)
+        int xr = bar_index + projBars + 2
+        liveLabels.push(label.new(xr, cur.entry, "ENTRY " + fmt(cur.entry), style = label.style_label_left, color = color.new(entryCol, 75), textcolor = chart.fg_color, size = size.small))
+        liveLabels.push(label.new(xr, cur.sl, "SL " + fmt(cur.sl), style = label.style_label_left, color = color.new(slCol, 75), textcolor = chart.fg_color, size = size.small))
+        liveLabels.push(label.new(xr, cur.tp, "TP " + fmt(cur.tp), style = label.style_label_left, color = color.new(tpCol, 75), textcolor = chart.fg_color, size = size.small))
+
+plot(showEmas ? ema9 : na, "EMA 9", color = color.new(#2196f3, 0), linewidth = 1)
+plot(showEmas ? ema21 : na, "EMA 21", color = color.new(#ff9800, 0), linewidth = 1)
+plot(showEmas ? ema50 : na, "EMA 50", color = color.new(#9c27b0, 0), linewidth = 2)
+plot(rsiV, "RSI", display = display.data_window)
+plot(volRatio, "Volume ratio", display = display.data_window)
+plot(newLong ? 1 : newShort ? -1 : 0, "Signal (1 buy, -1 sell)", display = display.data_window)
+
+// ───────────────────────────── Performance panel ─────────────────────────────
+panelPosition() =>
+    switch panelPos
+        "Top left"     => position.top_left
+        "Bottom right" => position.bottom_right
+        "Bottom left"  => position.bottom_left
+        => position.top_right
+panelText() =>
+    switch panelSize
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        => size.small
+
+var table pnl = table.new(panelPosition(), 2, 11, bgcolor = color.new(#131722, 15), frame_color = color.new(#8a8f98, 60), frame_width = 1, border_color = color.new(#8a8f98, 85), border_width = 1)
+cellRow(int r, string k, string v, color vc) =>
+    table.cell(pnl, 0, r, k, text_color = color.new(#d1d4dc, 0), text_size = panelText(), text_halign = text.align_left)
+    table.cell(pnl, 1, r, v, text_color = vc, text_size = panelText(), text_halign = text.align_right)
+
+if barstate.islast and showPanel
+    color white = color.new(#d1d4dc, 0)
+    table.cell(pnl, 0, 0, "Pro Scalping Signals", text_color = color.white, bgcolor = color.new(#2a2e39, 0), text_size = panelText(), text_halign = text.align_left)
+    table.cell(pnl, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.white, bgcolor = color.new(#2a2e39, 0), text_size = panelText(), text_halign = text.align_right)
+    float n = st.n
+    cellRow(1, "Closed trades", str.tostring(st.n) + "  (" + str.tostring(st.nL) + " B / " + str.tostring(st.nS) + " S)", white)
+    cellRow(2, "Win rate (net > 0)", n > 0 ? pct(st.win / n) : "—", white)
+    cellRow(3, "Target / stop hit", n > 0 ? pct(st.tp / n) + " / " + pct(st.sl / n) : "—", white)
+    float pf = st.loss > 0 ? st.gross / st.loss : na
+    cellRow(4, "Profit factor", na(pf) ? "—" : str.tostring(pf, "#.##"), na(pf) or pf >= 1 ? tpCol : slCol)
+    cellRow(5, "Net / avg per trade", n > 0 ? fmtR(st.net) + " / " + fmtR(st.net / n) : "—", st.net >= 0 ? tpCol : slCol)
+    cellRow(6, "Max drawdown", "-" + str.tostring(st.maxDd, "#.##") + "R", white)
+    cellRow(7, "Costs per side", str.tostring(feePct, "#.###") + "% fee + " + str.tostring(slipPct, "#.###") + "% slip", white)
+    cellRow(8, "Since", na(st.firstTime) ? "—" : str.format_time(st.firstTime, "yyyy-MM-dd", syminfo.timezone), white)
+    string state = not na(pend) ? (pend.dir == 1 ? "BUY" : "SELL") + " at next open" : na(cur) ? "Flat — waiting for 5/5" : (cur.dir == 1 ? "BUY @ " : "SELL @ ") + fmt(cur.entry)
+    cellRow(9, "Now", state, na(cur) and na(pend) ? color.new(#8a8f98, 0) : (not na(cur) ? cur.dir : pend.dir) == 1 ? buyCol : sellCol)
+    cellRow(10, "⚠ Backtest 30 pairs, 22 months", "33% win, -0.31R/trade after costs", slCol)
+
+// ───────────────────────────── Alerts ─────────────────────────────
+alertcondition(newLong, "PRO SCALP BUY", "PRO SCALP BUY signal {{ticker}} {{interval}} close {{close}}")
+alertcondition(newShort, "PRO SCALP SELL", "PRO SCALP SELL signal {{ticker}} {{interval}} close {{close}}")
+alertcondition(evTp, "PRO SCALP target hit", "PRO SCALP target hit {{ticker}} {{interval}}")
+alertcondition(evSl, "PRO SCALP stop hit", "PRO SCALP stop hit {{ticker}} {{interval}}")
+if (newLong or newShort) and not na(pend)
+    alert('{"signal":"' + (newLong ? "BUY" : "SELL") + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","close":' + fmt(pend.sigClose) + ',"sl":' + fmt(pend.sl) + ',"tp":' + fmt(pend.tp) + ',"entry":"next_open"}', alert.freq_once_per_bar_close)
+if evTp or evSl
+    alert('{"event":"' + (evTp ? "TP" : "SL") + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '"' + (na(lastR) ? "" : ',"R":' + str.tostring(lastR, "#.###")) + '}', alert.freq_once_per_bar_close)

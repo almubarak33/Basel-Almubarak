@@ -15,6 +15,8 @@ Python mirror of `indicators/APEX_Fusion_Pro.pine`, used to design and test the 
 | `final_config_v2.py` | **shipped defaults (v2.1)**: execution pack below 1H + Max Win-Rate; v1 execution + High Win-Rate on 1H+ |
 | `validate_final.py` | definitive tables for the shipped defaults → `results/validation_final.csv`, monthly, per setup, trade lists |
 | `fetch_assets.py`, `test_assets.py`, `asset_diag.py` | cross-asset test (crypto data is not committed: run `fetch_assets.py` to re-download it from the Binance archive) of the shipped defaults on silver, BTC/ETH/SOL and 8 US stocks → `results/cross_asset*.csv` |
+| `fetch_bot_data.py`, `bot_backtest.py` | historical test of pro-scalping-bot (30 pairs, 5m, Jan 2025–Oct 2026) → `results/bot_backtest.json` |
+| `pine_scalp_mirror.py` | Python mirror of `indicators/Pro_Scalping_Signals.pine`: signal parity with the bot (99.4%) and the indicator's trade statistics |
 | `htf_align_check.py` | sensitivity to the 4H bar anchor (17:00 vs 18:00 New York) |
 
 ```bash
