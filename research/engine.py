@@ -354,7 +354,7 @@ class Params:
     min_stop_pct: float = 0.0       # v2 volatility floor: skip signals whose stop is < this % of price (charts < 1H)
     warm: int = 250
     # v2: professional-technique options
-    entry_mode: str = "close"       # close = market at signal close | pullback = limit order on a retracement
+    entry_mode: str = "close"       # close = at signal close | pullback = limit on a retracement | next_open = market at next open
     pb_frac: float = 0.33           # limit price = close - dir * pb_frac * stop distance
     pb_bars: int = 3                # limit order validity (bars after the signal)
     asia_start: int = 20            # Asian range: 20:00 -> 02:00 New York
@@ -844,9 +844,11 @@ def simulate(F: dict, P: Params, longSig: np.ndarray, shortSig: np.ndarray, labe
             if cur is not None:
                 close(cur, i, c[i], "Reverse")
                 cur = None
-            if P.entry_mode == "pullback":
+            if P.entry_mode in ("pullback", "next_open"):
                 fills["signals"] += 1
-                pend = dict(dir=d, bar=i, limit=c[i] - d * P.pb_frac * dist, stop=c[i] - d * dist,
+                # next_open = market order after the close (a bot): fills at the next candle's open
+                limit = (c[i] - d * P.pb_frac * dist) if P.entry_mode == "pullback" else (math.inf if d == 1 else -math.inf)
+                pend = dict(dir=d, bar=i, limit=limit, stop=c[i] - d * dist,
                             setup=label[i] if label is not None else "")
                 break
             e = c[i]
