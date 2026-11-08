@@ -1,0 +1,12 @@
+# Runtime state written by trader-* skills (orders, plans, prices, positions)
+trader/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.DS_Store
