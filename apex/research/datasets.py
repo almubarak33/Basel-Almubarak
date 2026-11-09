@@ -21,10 +21,10 @@ FOREX = {"EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF"}
 class Market:
     """What the Pine script reads from syminfo.* / timeframe.*"""
     name: str          # dataset stem, e.g. "OANDA_XAUUSD_4h"
-    exchange: str      # "OANDA", "BINANCE", "BINANCEX" (deep Binance mirror), "TADAWUL", "NASDAQ", ...
+    exchange: str      # "OANDA", "BINANCE", "BINANCEX" (deep Binance mirror), "YF" (Yahoo), "TADAWUL", "NASDAQ", ...
     ticker: str        # syminfo.ticker, e.g. "XAUUSD"
-    sym_type: str      # syminfo.type: "crypto" | "forex" | "cfd" | "stock" | "index" | "fund"
-    interval: str      # "15m" | "1h" | "4h" | "1D"
+    sym_type: str      # syminfo.type: "crypto" | "forex" | "cfd" | "futures" | "stock" | "index" | "fund"
+    interval: str      # "5m" | "15m" | "1h" | "4h" | "1D"
     tf_seconds: int    # timeframe.in_seconds()
     htf_seconds: int   # seconds of the script's Auto higher timeframe
     mintick: float     # syminfo.mintick (only used by the script's `tp3 > mintick` guard)
@@ -35,15 +35,32 @@ def auto_htf_seconds(tf_s: int) -> int:
     return 3600 if tf_s <= 300 else 14400 if tf_s <= 3600 else 86400 if tf_s <= 14400 else 604800 if tf_s <= 86400 else 2592000
 
 
+# Data-quality rules found by scanning every series (zero-range bars, bad ticks):
+#  * excluded: Yahoo 5m feeds whose quotes are too coarse/thin for a 5-minute OHLC simulation
+#    (12-18% of bars have high == low, or dozens of bad-tick spikes).
+#  * trimmed: daily histories whose first years are close-only prints (open = high = low = close).
+EXCLUDE = {"YF_EURUSD_5m", "YF_AUDUSD_5m", "YF_BRENT_5m"}
+TRIM_START = {"OANDA_XAUUSD_1D": "2000-05-01", "OANDA_XAGUSD_1D": "2000-05-01", "TADAWUL_2010_1D": "2004-02-01"}
+
+
 def list_datasets() -> list[str]:
-    return sorted(f[:-4] for f in os.listdir(DATA) if f.endswith(".csv"))
+    return sorted(f[:-4] for f in os.listdir(DATA) if f.endswith(".csv") and f[:-4] not in EXCLUDE)
 
 
 def load(name: str) -> dict:
-    """-> {"t","o","h","l","c","v"} float64 numpy arrays (t as int64), oldest bar first."""
+    """-> {"t","o","h","l","c","v"} float64 numpy arrays (t as int64), oldest bar first.
+
+    Applies the data-quality rules above: optional start trim, and high/low are widened to contain
+    open/close on the rare malformed row.
+    """
     a = np.loadtxt(os.path.join(DATA, name + ".csv"), delimiter=",", skiprows=1, ndmin=2)
-    return {"t": a[:, 0].astype(np.int64), "o": a[:, 1].copy(), "h": a[:, 2].copy(),
-            "l": a[:, 3].copy(), "c": a[:, 4].copy(), "v": a[:, 5].copy()}
+    if name in TRIM_START:
+        t0 = dt.datetime.strptime(TRIM_START[name], "%Y-%m-%d").replace(tzinfo=dt.UTC).timestamp()
+        a = a[a[:, 0] >= t0]
+    o, h, l, c = a[:, 1].copy(), a[:, 2].copy(), a[:, 3].copy(), a[:, 4].copy()
+    h = np.maximum(h, np.maximum(o, c))
+    l = np.minimum(l, np.minimum(o, c))
+    return {"t": a[:, 0].astype(np.int64), "o": o, "h": h, "l": l, "c": c, "v": a[:, 5].copy()}
 
 
 def _sym_type(exchange: str, ticker: str) -> str:
@@ -51,6 +68,8 @@ def _sym_type(exchange: str, ticker: str) -> str:
         return "crypto"
     if exchange == "OANDA":
         return "forex" if ticker in FOREX else "cfd"
+    if exchange == "YF":                                   # Yahoo: front futures contracts and FX quotes
+        return "forex" if ticker in FOREX else "futures"
     if ticker in ("TASI",):
         return "index"
     if ticker in ("SPY",):

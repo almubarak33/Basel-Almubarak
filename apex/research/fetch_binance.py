@@ -13,12 +13,12 @@ import urllib.request
 
 BASE = "https://data-api.binance.vision/api/v3/klines"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-ITV = {"15m": "15m", "1h": "1h", "4h": "4h", "1D": "1d"}
+ITV = {"5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1D": "1d"}
 # symbol -> {interval: max bars}
 UNIVERSE = {
-    "BTCUSDT": {"15m": 60000, "1h": 50000, "4h": 20000, "1D": 4000},
-    "ETHUSDT": {"15m": 60000, "1h": 50000, "4h": 20000, "1D": 4000},
-    "SOLUSDT": {"1h": 40000, "4h": 12000, "1D": 3000},
+    "BTCUSDT": {"5m": 100000, "15m": 60000, "1h": 50000, "4h": 20000, "1D": 4000},
+    "ETHUSDT": {"5m": 100000, "15m": 60000, "1h": 50000, "4h": 20000, "1D": 4000},
+    "SOLUSDT": {"5m": 100000, "1h": 40000, "4h": 12000, "1D": 3000},
     "BNBUSDT": {"1h": 40000, "4h": 20000, "1D": 4000},
     "XRPUSDT": {"1h": 40000, "4h": 20000, "1D": 4000},
 }

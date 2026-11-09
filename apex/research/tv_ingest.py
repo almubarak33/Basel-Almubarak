@@ -5,6 +5,7 @@ Usage: python3 tv_ingest.py [RAW_DIR] [OUT_DIR]
 Each raw file is the tool JSON: {symbol, interval, bars:{t,o,h,l,c,v}, ...} (format="columns").
 Pages of the same (symbol, interval) are merged, de-duplicated on t and sorted.
 The still-forming last bar is dropped (bar open + interval must be <= file mtime).
+Files are written atomically and only when their content changed.
 Output: OUT_DIR/<EXCHANGE>_<TICKER>_<interval>.csv with header t,o,h,l,c,v (t = unix seconds UTC, bar OPEN time)
 and OUT_DIR/manifest.json.
 """
@@ -46,11 +47,12 @@ def main():
     for (sym, itv), rows in sorted(series.items()):
         ts = sorted(rows)
         name = f"{sym.replace(':', '_')}_{itv}.csv"
-        with open(os.path.join(OUT, name), "w") as fh:
-            fh.write("t,o,h,l,c,v\n")
-            for t in ts:
-                o, h, l, c, v = rows[t]
-                fh.write(f"{t},{o},{h},{l},{c},{v}\n")
+        body = "t,o,h,l,c,v\n" + "".join(f"{t},{rows[t][0]},{rows[t][1]},{rows[t][2]},{rows[t][3]},{rows[t][4]}\n" for t in ts)
+        path = os.path.join(OUT, name)
+        if not os.path.exists(path) or open(path).read() != body:   # leave unchanged files untouched
+            with open(path + ".part", "w") as fh:
+                fh.write(body)
+            os.replace(path + ".part", path)                         # atomic: readers never see a partial file
         iso = lambda x: dt.datetime.fromtimestamp(x, dt.UTC).strftime("%Y-%m-%d %H:%M")
         manifest.append({"file": name, "symbol": sym, "interval": itv, "bars": len(ts),
                          "first": iso(ts[0]), "last": iso(ts[-1]), "source": "TradingView MCP get_ohlcv"})
