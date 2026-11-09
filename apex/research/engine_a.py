@@ -250,8 +250,9 @@ def ta_supertrend(high, low, close, factor: float, atrPeriod: int):
     """ta.supertrend(factor, atrPeriod) -> (superTrend, direction); direction < 0 means UP-trend.
 
     lowerBand[1], upperBand[1] and prevSuperTrend are the FINAL (already adjusted) values of the
-    previous bar.  While atr is na the comparisons are all False, so both bands settle at
-    nz(previous) = 0 and direction is 1; direction is therefore never na.
+    previous bar.  While atr is na the raw bands are na and every comparison with them is False:
+    the lower band falls back to nz(previous) = 0, the upper band stays na (close[1] > 0 keeps the
+    raw value) and `na(atr[1])` forces direction = 1.  direction is therefore never na.
     """
     hi, lo, cl = _floats(high), _floats(low), _floats(close)
     atr = _floats(ta_atr(high, low, close, atrPeriod))
@@ -414,6 +415,7 @@ def compute_series(chart: dict, htf: dict, params: Params, market) -> dict:
     """
     p = params
     _runtime_checks(p)
+    donLen, stLen, swingLook, chLen = int(p.donLen), int(p.stLen), int(p.swingLook), int(p.chLen)   # input.int
 
     chart_t = np.asarray(chart["t"])
     open_s, high_s, low_s, close_s = _floats(chart["o"]), _floats(chart["h"]), _floats(chart["l"]), _floats(chart["c"])
@@ -437,20 +439,20 @@ def compute_series(chart: dict, htf: dict, params: Params, market) -> dict:
     ema21_arr = ta_ema(close_s, 21)                                             # L142
     ema55_arr = ta_ema(close_s, 55)                                             # L143
     ema200_arr = ta_ema(close_s, 200)                                           # L144
-    stLine_arr, stDir_arr = ta_supertrend(high_s, low_s, close_s, p.stFactor, p.stLen)   # L145
+    stLine_arr, stDir_arr = ta_supertrend(high_s, low_s, close_s, p.stFactor, stLen)     # L145
     diP_arr, diM_arr, adx_arr = ta_dmi(high_s, low_s, close_s, 14, 14)          # L146
     rsi14_arr = ta_rsi(close_s, 14)                                             # L147
     # L148-L153 (rng14, chop, Bollinger/Keltner squeeze) are never read by the script: not ported.
 
     # Windowed built-ins that the signal lines reference (called on every bar in Pine).
-    highestDon_arr = ta_highest(high_s, p.donLen)                               # ta.highest(high, donLen)   L170
-    lowestDon_arr = ta_lowest(low_s, p.donLen)                                  # ta.lowest(low, donLen)     L171
+    highestDon_arr = ta_highest(high_s, donLen)                                 # ta.highest(high, donLen)   L170
+    lowestDon_arr = ta_lowest(low_s, donLen)                                    # ta.lowest(low, donLen)     L171
     lowMinusEma_arr = ta_lowest(_arr(low_s) - ema21_arr, 5)                     # ta.lowest(low - ema21, 5)  L176
     highMinusEma_arr = ta_highest(_arr(high_s) - ema21_arr, 5)                  # ta.highest(high - ema21,5) L177
-    swingLow_arr = ta_lowest(low_s, p.swingLook)                                # ta.lowest(low, swingLook)  L191
-    swingHigh_arr = ta_highest(high_s, p.swingLook)                             # ta.highest(high, swingLook) L192
-    chHigh_arr = ta_highest(high_s, p.chLen)                                    # ta.highest(high, chLen)    L204
-    chLow_arr = ta_lowest(low_s, p.chLen)                                       # ta.lowest(low, chLen)      L205
+    swingLow_arr = ta_lowest(low_s, swingLook)                                  # ta.lowest(low, swingLook)  L191
+    swingHigh_arr = ta_highest(high_s, swingLook)                               # ta.highest(high, swingLook) L192
+    chHigh_arr = ta_highest(high_s, chLen)                                      # ta.highest(high, chLen)    L204
+    chLow_arr = ta_lowest(low_s, chLen)                                         # ta.lowest(low, chLen)      L205
 
     # Python-float views for the bar loop.
     atr_s, ema21_s, ema55_s, ema200_s = _floats(atr_arr), _floats(ema21_arr), _floats(ema55_arr), _floats(ema200_arr)
@@ -479,12 +481,27 @@ def compute_series(chart: dict, htf: dict, params: Params, market) -> dict:
     trigNameL_out = ["PB"] * n
     trigNameS_out = ["PB"] * n
 
+    # The two helpers below read the current bar's variables of the loop exactly as a Pine function
+    # reads the script's globals (Python closures look the names up at call time).
     bar_index = 0
+    close = ema21 = ema55 = ema200 = adx = diP = diM = rsi14 = htfTrend = NAN
 
     def prev(series: list, k: int):
         """Pine history operator series[k] on the current bar: na when fewer than k previous bars exist."""
         j = bar_index - k
         return series[j] if j >= 0 else NAN
+
+    def scoreOf(d: int) -> int:                                                 # L155-L164
+        # Every test is a comparison, so a na operand contributes 0.
+        s = 0
+        s += 1 if htfTrend == d else 0                                          # L157
+        s += 1 if (close - ema200) * d > 0 else 0                               # L158
+        s += 1 if (ema21 - ema55) * d > 0 else 0                                # L159
+        s += 1 if adx > p.adxMin else 0                                         # L160
+        s += 1 if (adx > prev(adx_s, 3) and adx > 18) else 0                    # L161
+        s += 1 if (diP - diM) * d > 0 else 0                                    # L162
+        s += 1 if (rsi14 - 50) * d > 0 else 0                                   # L163
+        return s
 
     for bar_index in range(n):
         # Current-bar values under their Pine names.
@@ -497,18 +514,6 @@ def compute_series(chart: dict, htf: dict, params: Params, market) -> dict:
         # L150: tsm = (sign(close - close[20]) + sign(close - close[50]) + sign(close - close[100]) + sign(close - close[200])) / 4
         tsm = (pine_sign(close - prev(close_s, 20)) + pine_sign(close - prev(close_s, 50))
                + pine_sign(close - prev(close_s, 100)) + pine_sign(close - prev(close_s, 200))) / 4
-
-        # L155-L164: scoreOf(d).  Every test is a comparison, so a na operand contributes 0.
-        def scoreOf(d: int) -> int:
-            s = 0
-            s += 1 if htfTrend == d else 0                                      # L157
-            s += 1 if (close - ema200) * d > 0 else 0                           # L158
-            s += 1 if (ema21 - ema55) * d > 0 else 0                            # L159
-            s += 1 if adx > p.adxMin else 0                                     # L160
-            s += 1 if (adx > prev(adx_s, 3) and adx > 18) else 0                # L161
-            s += 1 if (diP - diM) * d > 0 else 0                                # L162
-            s += 1 if (rsi14 - 50) * d > 0 else 0                               # L163
-            return s
 
         scoreL = scoreOf(1)                                                     # L166
         scoreS = scoreOf(-1)                                                    # L167
@@ -664,6 +669,16 @@ def simulate(o, h, l, c,                 # float arrays, one row per bar
     `// 2)` (new signals), openTrade, closeTrade, activeStopReason and the Stats bookkeeping.
 
     Returns {"trades": [...closed trades in closing order...], "open_trade": None | {...}, "stats": {...}}.
+
+    Properties that follow from the Pine code (asserted by the self-checks, useful for differential tests):
+      * exit_bar > entry_bar for EVERY closed trade, "Reverse" included: block 1 needs
+        bar_index > entryBar and block 2 is one if / else-if, so the bar that opens a trade cannot close it.
+      * A new trade may open on the bar that closed the previous one (stop/target then signal, or Reverse).
+      * reason "SL" (initial stop, full position): gross_R == -1 when exit_px == sl0; when the bar OPENED
+        beyond the stop the exit is the open and gross_R < -1.  "Remaining SL" / "BE/Trail" gap the same way.
+      * A live trade always has 1e-9 < openW <= 1; hit2 implies hit1; hit3 implies hit2 and reason "TP3".
+      * If longSig and shortSig are both true: flat or short -> the long branch wins; long -> the short
+        branch (the else-if) reverses.
     """
     open_s, high_s, low_s, close_s = _floats(o), _floats(h), _floats(l), _floats(c)
     n = len(close_s)

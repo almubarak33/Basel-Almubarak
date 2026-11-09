@@ -11,6 +11,13 @@ Layout (see ENGINE_SPEC.md for the public interface):
   3. simulate(...) / run(...)  spec wrappers that turn the arrays into the result dict.
      simulate_arrays(...) is the same thing without the dict conversion (for parameter sweeps).
 
+Sweep usage (features once, kernel many times; ~0.2 ms per kernel call on 60 000 bars):
+
+    base = base_features(chart, htf, market)              # parameter-free, cache per dataset
+    f = features(chart, htf, params, market, base)        # signals / stops for one Params
+    rec, open_state, stats = run_fast(chart, f, {**mgmt_of(params, market), "k3": 6.0})
+    trades = trades_list(rec); st = stats_dict(stats)     # columns: REC_COLS / OPEN_COLS / STAT_KEYS
+
 na handling (deliberate, not accidental):
   * na is float nan everywhere.
   * Pine: "any comparison with na is false".  All comparisons that can see a nan are done on scalars inside
@@ -79,10 +86,22 @@ class Params:                      # defaults == the Pine input defaults
     costMode: str = "Auto"; costCustom: float = 0.05
 
 
-def validate(params: Params) -> None:
-    """The script's barstate.isfirst runtime.error() checks (the indicator would not run at all)."""
+def _check_options(params: Params) -> None:
+    """dirMode / profile / costMode are input.string(..., options=[...]) in the script, so no other string can
+    ever reach its logic.  The script's expressions are written as `dirMode != "Short only"` and
+    `costMode == "Auto" ? ... : costCustom`: a misspelt option ("Long Only", "custom", "Balanced") would silently
+    behave like "Both" / "Custom" / a half-custom profile instead of failing -> reject it."""
+    if params.dirMode not in ("Both", "Long only", "Short only"):
+        raise ValueError(f"unknown dirMode {params.dirMode!r}")
     if params.profile not in ("AUTO", "HP", "BAL", "RUN", "CUS"):
         raise ValueError(f"unknown profile {params.profile!r}")
+    if params.costMode not in ("Auto", "Custom"):
+        raise ValueError(f"unknown costMode {params.costMode!r}")
+
+
+def validate(params: Params) -> None:
+    """The script's barstate.isfirst runtime.error() checks (the indicator would not run at all)."""
+    _check_options(params)
     if params.slMinAtr > params.slMaxAtr:
         raise ValueError("Stop distance min ATR must be less than or equal to max ATR.")
     if params.profile == "CUS":
@@ -94,6 +113,7 @@ def validate(params: Params) -> None:
 
 def cost_pct(params: Params, market) -> float:
     """float costPct = costMode == "Auto" ? (crypto ? 0.10 : hiCostMetal ? 0.06 : 0.03) : costCustom"""
+    _check_options(params)
     if params.costMode == "Auto":
         if market.sym_type == "crypto":
             return 0.10
@@ -105,6 +125,7 @@ def cost_pct(params: Params, market) -> float:
 
 def mgmt_of(params: Params, market) -> dict:
     """Management profile block of the script -> the `mgmt` dict of simulate()."""
+    _check_options(params)
     prof = params.profile
     if prof == "AUTO":
         prof = "RUN" if market.sym_type == "crypto" else "HP"
@@ -602,7 +623,7 @@ def features(chart: dict, htf: dict, params: Params, market, base: dict | None =
     if base is None:
         base = base_features(chart, htf, market)
     p = params
-    cp = cost_pct(p, market)
+    cp = cost_pct(p, market)                  # also rejects a misspelt dirMode / profile / costMode
     guard_on = bool(p.smallGuard) and int(market.tf_seconds) < 3600
     (st_line, st_dir, don_hi, don_lo, score_l, score_s, brk_up, brk_dn, flip_up, flip_dn, pb_up, pb_dn,
      trig_l, trig_s, trig_code_l, trig_code_s, sl_dist_l, sl_dist_s, chand_l, chand_s,

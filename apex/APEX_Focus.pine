@@ -51,7 +51,7 @@ minScore    = input.int(7, "Minimum confluence score (0-7)", minval = 0, maxval 
 adxMin      = input.float(25.0, "ADX trend threshold", minval = 5, step = 1, group = G_SIG)
 useTsm      = input.bool(true, "Momentum ensemble must agree (TSMOM 20/50/100/200)", group = G_SIG, tooltip = "Price must be above (long) / below (short) its close 20, 50, 100 and 200 bars ago.")
 dirMode     = input.string(DIR_AUTO, "Direction", options = [DIR_AUTO, "Both", "Long only", "Short only"], group = G_SIG, tooltip = "Auto: long only, except forex symbols where both sides trade. Backtest (104 series, 5m-1D): short trades lost money on metals, energy, indices and stocks and were flat on forex and crypto, on tuning data and on unseen data alike.")
-htfMode     = input.string("Auto", "Higher timeframe · custom", options = ["Auto", "Custom"], group = G_SIG, inline = "htf", tooltip = "Auto: ≤5m→1H, ≤1H→4H, ≤4H→1D, 1D→1W, above→1M. HTF trend = close versus an EMA plus SuperTrend(3,10) on the previous completed higher-timeframe bar. EMA length: Auto uses 50 for an intraday HTF and 21 for 1D and above; Custom uses 50 below 1W and 21 from 1W. A Custom timeframe lower than the chart is replaced by the chart timeframe.")
+htfMode     = input.string("Auto", "Higher timeframe · custom", options = ["Auto", "Custom"], group = G_SIG, inline = "htf", tooltip = "Auto: ≤5m→1H, ≤1H→4H, ≤4H→1D, ≤1D→1W, above→1M. HTF trend = close versus an EMA plus SuperTrend(3,10) on the previous completed higher-timeframe bar. EMA length: Auto uses 50 for an intraday HTF and 21 for 1D and above; Custom uses 50 below 1W and 21 from 1W. A Custom timeframe lower than the chart is replaced by the chart timeframe.")
 htfCustom   = input.timeframe("240", "", group = G_SIG, inline = "htf")
 
 profileIn   = input.string(PROF_AUTO, "Trade-management profile", options = [PROF_AUTO, PROF_SNP, PROF_HP, PROF_BAL, PROF_RUN, PROF_CUS], group = G_RISK, tooltip = "Sniper: 0.15R / 1.5R / 4R, breakeven and trailing after TP1 (highest hit rate, smallest average win). High-Probability: 0.3R / 1.5R / 4R with trailing after TP1. Balanced: 1R / 2R / 3R. Trend Runner: 1R / 2R / 8R with trailing after TP2 (lowest hit rate, largest average result in the backtests). The smaller the first target, the higher the win rate and the lower the profit per trade: check the statistics panel.")
@@ -91,9 +91,9 @@ showChan    = input.bool(true, "Linear-regression channel · length · deviation
 chanLen     = input.int(100, "", minval = 20, maxval = 900, group = G_STR, inline = "ch1")
 chanDev     = input.float(2.0, "", minval = 0.5, step = 0.1, group = G_STR, inline = "ch1")
 showTl      = input.bool(true, "Pivot trendlines · pivot strength", group = G_STR, inline = "tl")
-pivLen      = input.int(10, "", minval = 2, maxval = 50, group = G_STR, inline = "tl")
+pivLen      = input.int(10, "", minval = 2, maxval = 50, group = G_STR, inline = "tl", tooltip = "Pivot length for the trendlines, the support/resistance zones and the support rebound watch (group ⑦). It stays in effect when the trendlines are hidden.")
 showZones   = input.bool(true, "Support / resistance zones · per side", group = G_STR, inline = "z")
-zoneCount   = input.int(3, "", minval = 1, maxval = 10, group = G_STR, inline = "z")
+zoneCount   = input.int(3, "", minval = 1, maxval = 10, group = G_STR, inline = "z", tooltip = "Zones drawn per side, and also how many recent pivot-low supports the rebound watch (group ⑦) remembers, even when the zones are hidden.")
 
 showDash    = input.bool(true, "Statistics panel · position", group = G_DASH, inline = "dash", tooltip = "Results of the internal simulation over the bars loaded on this chart, after the cost below. They describe the past of this chart only.")
 dashPosIn   = input.string("Top right", "", options = ["Top right", "Top left", "Middle right", "Bottom right", "Bottom left"], group = G_DASH, inline = "dash")
@@ -101,7 +101,7 @@ costMode    = input.string("Auto", "Round-trip cost · custom %", options = ["Au
 costCustom  = input.float(0.05, "", minval = 0, step = 0.01, group = G_DASH, inline = "cost")
 
 acct        = input.float(10000, "Account size · risk %", minval = 0, group = G_SIZE, inline = "acc")
-riskPct     = input.float(1.0, "", minval = 0.01, step = 0.1, group = G_SIZE, inline = "acc")
+riskPct     = input.float(1.0, "", minval = 0.01, step = 0.1, group = G_SIZE, inline = "acc", tooltip = "Shown only in the entry-arrow tooltip. Size = account × risk% ÷ (stop distance × point value), in units/contracts. The account is assumed to be in the symbol's quote currency (no currency conversion); lot steps and costs are not applied.")
 
 // ───────────────────────────── Support rebound inputs ─────────────────────────────
 const string G_BOUNCE = "⑦ Support rebound watch"
@@ -339,10 +339,10 @@ extendTrade(Trade t, int x) =>
         t.bxRisk.set_right(x)
         t.bxReward.set_right(x)
 
-hitMark(float price, string txt, color col) =>
+hitMark(int lvl, float price, color col) =>
     if showHits
-        string compact = str.contains(txt, "1") ? "TP1" : str.contains(txt, "2") ? "TP2" : "TP3"
-        label mark = label.new(bar_index, price, compact, style = label.style_none, textcolor = col, size = size.tiny, tooltip = txt + " " + fmt(price))
+        string tip = tr("Target ", "الهدف ") + str.tostring(lvl) + " ✓ " + fmt(price)
+        label mark = label.new(bar_index, price, "TP" + str.tostring(lvl), style = label.style_none, textcolor = col, size = size.tiny, tooltip = tip)
         keepMarker(eventMarkers, mark, 12)
 
 // Stop telemetry is based on the active stop and remaining position, not TP flags.
@@ -390,8 +390,10 @@ openTrade(int d, string trig, int score) =>
     float dist = d == 1 ? slDistL : slDistS
     float tp2 = e + d * k2 * dist
     float tp3 = e + d * k3 * dist
-    // a far short target can fall at or below zero: leave it empty (it can never fill) and let the stop/trail manage the rest
-    Trade t = Trade.new(d, bar_index, trig, score, e, e - d * dist, e - d * dist, dist, e + d * k1 * dist, tp2 > syminfo.mintick ? tp2 : na, tp3 > syminfo.mintick ? tp3 : na)
+    // A target that can never fill is left empty: a far short target at or below zero, and TP3 when the
+    // close percentages leave no runner after TP2. The stop/trail manages whatever remains.
+    bool hasRunner = w1 + w2 < 1.0 - 1e-9
+    Trade t = Trade.new(d, bar_index, trig, score, e, e - d * dist, e - d * dist, dist, e + d * k1 * dist, tp2 > syminfo.mintick ? tp2 : na, hasRunner and tp3 > syminfo.mintick ? tp3 : na)
     float tp2Edge = na(t.tp2) ? t.tp1 : t.tp2
     float rewardEdge = na(t.tp3) ? tp2Edge : t.tp3
     color c = d == 1 ? bullCol : bearCol
@@ -448,7 +450,7 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
             if beOn
                 cur.sl := d == 1 ? math.max(cur.sl, cur.entry) : math.min(cur.sl, cur.entry)
             evTp1 := true
-            hitMark(cur.tp1, tr("TP1 ✓", "الهدف 1 ✓"), bullCol)
+            hitMark(1, cur.tp1, bullCol)
         if cur.openW > 1e-9 and cur.hit1 and not cur.hit2 and (d == 1 ? open >= cur.tp2 : open <= cur.tp2)
             cur.hit2 := true
             float w = math.min(w2, cur.openW)
@@ -456,7 +458,7 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
             cur.openW -= w
             cur.sl := d == 1 ? math.max(cur.sl, cur.tp1) : math.min(cur.sl, cur.tp1)
             evTp2 := true
-            hitMark(cur.tp2, tr("TP2 ✓", "الهدف 2 ✓"), bullCol)
+            hitMark(2, cur.tp2, bullCol)
         if cur.openW <= 1e-9
             lastR := closeTrade(cur, cur.hit2 ? cur.tp2 : cur.tp1, "TP")
             cur := na
@@ -465,7 +467,7 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
             cur.realized += cur.openW * k3
             cur.openW := 0.0
             evTp3 := true
-            hitMark(cur.tp3, tr("TP3 ✓✓", "الهدف 3 ✓✓"), bullCol)
+            hitMark(3, cur.tp3, bullCol)
             lastR := closeTrade(cur, cur.tp3, "TP3")
             cur := na
         if not na(cur)
@@ -495,7 +497,7 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
                     if beOn
                         cur.sl := d == 1 ? math.max(cur.sl, cur.entry) : math.min(cur.sl, cur.entry)
                     evTp1 := true
-                    hitMark(cur.tp1, tr("TP1 ✓", "الهدف 1 ✓"), bullCol)
+                    hitMark(1, cur.tp1, bullCol)
                 if cur.openW > 1e-9 and cur.hit1 and not cur.hit2 and (d == 1 ? high >= cur.tp2 : low <= cur.tp2)
                     cur.hit2 := true
                     float w = math.min(w2, cur.openW)
@@ -503,7 +505,7 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
                     cur.openW -= w
                     cur.sl := d == 1 ? math.max(cur.sl, cur.tp1) : math.min(cur.sl, cur.tp1)
                     evTp2 := true
-                    hitMark(cur.tp2, tr("TP2 ✓", "الهدف 2 ✓"), bullCol)
+                    hitMark(2, cur.tp2, bullCol)
                 if cur.openW <= 1e-9
                     lastR := closeTrade(cur, cur.hit2 ? cur.tp2 : cur.tp1, "TP")
                     cur := na
@@ -512,7 +514,7 @@ if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
                     cur.realized += cur.openW * k3
                     cur.openW := 0.0
                     evTp3 := true
-                    hitMark(cur.tp3, tr("TP3 ✓✓", "الهدف 3 ✓✓"), bullCol)
+                    hitMark(3, cur.tp3, bullCol)
                     lastR := closeTrade(cur, cur.tp3, "TP3")
                     cur := na
                 // The low was above the old stop, so the close can only be at or through the stop if a
