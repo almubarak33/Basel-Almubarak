@@ -1,0 +1,21 @@
+ok   rule0: carried to next open
+ok   rule1: exit at raised stop on the same bar
+ok   rule1: no exit when the close is above the raised stop
+ok   rule2: exit when the low reached the raised stop
+ok   rule0: untouched when no fill raised the stop
+ok   rule1: untouched when no fill raised the stop
+ok   rule2: untouched when no fill raised the stop
+ok   rule1: no breakeven -> no exit
+ok   rule1: TP1 lock after TP2
+ok   rule1: short mirror
+ok   rule1: initial stop still first
+ok   rule1: cost can turn the scratch into a loss
+ok   replay order A: first chart bar with fine data is bar 0
+ok   replay order A: remainder survives the bar
+ok   replay order A: chart-bar rule 1 keeps the trade (close above the stop)
+ok   replay order B: first chart bar with fine data is bar 0
+ok   replay order B: remainder stopped at breakeven inside the bar
+ok   replay order B: chart-bar rule 1 keeps the trade (close above the stop)
+ok   replay: signal on the first covered bar is ignored
+ok   v2 kernel with closeStop=0 is bit-identical to engine_b (675 dataset x parameter cases)
+PASS

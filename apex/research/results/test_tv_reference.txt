@@ -1,0 +1,13 @@
+ok  TADAWUL_TASI_1D    atr     engine=149.8328484272 tradingview=149.8328484272 rel.err=3.8e-16
+ok  TADAWUL_TASI_1D    rsi14   engine=49.6243167342 tradingview=49.6243167342 rel.err=2.9e-16
+ok  TADAWUL_TASI_1D    adx     engine=38.1006732541 tradingview=38.1006732541 rel.err=5.6e-16
+ok  TADAWUL_TASI_1D    diP     engine=22.9085875501 tradingview=22.9085875501 rel.err=1.6e-16
+ok  TADAWUL_TASI_1D    diM     engine=30.6866489047 tradingview=30.6866489047 rel.err=0.0e+00
+ok  TADAWUL_TASI_1D    ema200  engine=10756.5898309917 tradingview=10756.5898309917 rel.err=6.4e-15
+ok  TADAWUL_2222_1D    atr     engine=0.2873638913 tradingview=0.2873638913 rel.err=9.7e-16
+ok  TADAWUL_2222_1D    rsi14   engine=56.3180153244 tradingview=56.3180153244 rel.err=3.8e-16
+ok  TADAWUL_2222_1D    adx     engine=14.3387518729 tradingview=14.3387926910 rel.err=2.8e-06
+ok  TADAWUL_2222_1D    diP     engine=24.3103752260 tradingview=24.3103730733 rel.err=8.9e-08
+ok  TADAWUL_2222_1D    diM     engine=17.8938942181 tradingview=17.8938844038 rel.err=5.5e-07
+ok  TADAWUL_2222_1D    ema200  engine=26.1049890022 tradingview=26.1049890022 rel.err=3.0e-15
+PASS

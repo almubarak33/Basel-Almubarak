@@ -1,0 +1,123 @@
+universe: 105 primary series, 1,451,111 bars; tune=63 holdout=42
+
+[A] v1 defaults (Direction Both) vs v2 defaults (Direction Auto), profile Auto, all data pooled
+5m  v1 Both                    n=  556 win= 58.5% [54.3,62.5] tp1= 68.0% avgR=-0.052 PF= 0.86 net=   -28.7R maxDD= 45.8R
+5m  v2 Auto                    n=  255 win= 61.2% [55.1,67.0] tp1= 68.6% avgR=-0.029 PF= 0.92 net=    -7.4R maxDD= 18.6R
+15m v1 Both                    n=  457 win= 49.9% [45.3,54.5] tp1= 61.1% avgR=-0.049 PF= 0.89 net=   -22.5R maxDD= 38.8R
+15m v2 Auto                    n=  201 win= 46.3% [39.5,53.2] tp1= 56.7% avgR=-0.118 PF= 0.76 net=   -23.8R maxDD= 26.8R
+1h  v1 Both                    n= 3361 win= 57.6% [55.9,59.3] tp1= 65.6% avgR=-0.014 PF= 0.96 net=   -47.1R maxDD= 68.2R
+1h  v2 Auto                    n= 2055 win= 61.9% [59.8,64.0] tp1= 67.3% avgR=-0.014 PF= 0.96 net=   -28.8R maxDD= 63.5R
+4h  v1 Both                    n= 1593 win= 63.4% [61.0,65.7] tp1= 69.1% avgR=+0.058 PF= 1.17 net=   +91.8R maxDD= 42.0R
+4h  v2 Auto                    n= 1048 win= 70.4% [67.6,73.1] tp1= 73.7% avgR=+0.121 PF= 1.43 net=  +126.3R maxDD= 19.7R
+1D  v1 Both                    n= 1654 win= 77.7% [75.6,79.6] tp1= 79.3% avgR=+0.096 PF= 1.45 net=  +158.9R maxDD= 11.7R
+1D  v2 Auto                    n= 1191 win= 80.9% [78.5,83.0] tp1= 81.5% avgR=+0.151 PF= 1.80 net=  +179.5R maxDD=  8.6R
+
+[B] same, unseen data only (TEST_TIME + TEST_INSTR)
+5m  v1 Both                    n=  292 win= 61.0% [55.3,66.4] tp1= 69.2% avgR=-0.008 PF= 0.98 net=    -2.2R maxDD= 20.6R
+5m  v2 Auto                    n=  116 win= 62.1% [53.0,70.4] tp1= 70.7% avgR=+0.051 PF= 1.15 net=    +6.0R maxDD=  9.9R
+15m v1 Both                    n=  339 win= 48.7% [43.4,54.0] tp1= 60.2% avgR=-0.031 PF= 0.93 net=   -10.5R maxDD= 28.9R
+15m v2 Auto                    n=  145 win= 43.4% [35.7,51.6] tp1= 54.5% avgR=-0.080 PF= 0.85 net=   -11.6R maxDD= 16.6R
+1h  v1 Both                    n= 2094 win= 57.3% [55.1,59.4] tp1= 65.9% avgR=+0.000 PF= 1.00 net=    +0.0R maxDD= 60.1R
+1h  v2 Auto                    n= 1233 win= 60.5% [57.7,63.2] tp1= 66.6% avgR=-0.011 PF= 0.97 net=   -13.8R maxDD= 37.6R
+4h  v1 Both                    n=  998 win= 62.0% [59.0,65.0] tp1= 67.6% avgR=+0.034 PF= 1.10 net=   +34.1R maxDD= 26.1R
+4h  v2 Auto                    n=  638 win= 69.3% [65.6,72.7] tp1= 72.9% avgR=+0.099 PF= 1.34 net=   +63.5R maxDD= 13.7R
+1D  v1 Both                    n= 1127 win= 77.3% [74.7,79.6] tp1= 78.9% avgR=+0.076 PF= 1.35 net=   +85.7R maxDD= 10.8R
+1D  v2 Auto                    n=  814 win= 80.7% [77.9,83.3] tp1= 81.2% avgR=+0.130 PF= 1.68 net=  +105.8R maxDD=  8.6R
+
+[C] v2 Direction Auto: management profiles on 1D and 4H (non-crypto and crypto pooled)
+1D SHD                     | TRAIN      n= 600 win= 92.7% avgR=+0.072 PF= 2.40 | TEST_TIME  n= 412 win= 93.4% avgR=+0.062 PF= 2.51 | TEST_INSTR n= 819 win= 93.7% avgR=+0.059 PF= 2.44
+1D SNP                     | TRAIN      n= 489 win= 90.4% avgR=+0.116 PF= 2.22 | TEST_TIME  n= 356 win= 88.5% avgR=+0.057 PF= 1.50 | TEST_INSTR n= 659 win= 89.7% avgR=+0.086 PF= 1.89
+1D HP                      | TRAIN      n= 383 win= 82.2% avgR=+0.168 PF= 1.95 | TEST_TIME  n= 292 win= 81.5% avgR=+0.101 PF= 1.55 | TEST_INSTR n= 539 win= 82.0% avgR=+0.121 PF= 1.67
+1D BAL                     | TRAIN      n= 317 win= 61.2% avgR=+0.348 PF= 1.88 | TEST_TIME  n= 232 win= 59.5% avgR=+0.247 PF= 1.60 | TEST_INSTR n= 429 win= 59.9% avgR=+0.270 PF= 1.66
+1D RUN                     | TRAIN      n= 262 win= 46.6% avgR=+0.447 PF= 1.97 | TEST_TIME  n= 193 win= 46.6% avgR=+0.361 PF= 1.77 | TEST_INSTR n= 367 win= 47.4% avgR=+0.375 PF= 1.84
+4h SHD                     | TRAIN      n= 705 win= 74.2% avgR=+0.003 PF= 1.05 | TEST_TIME  n= 402 win= 66.4% avgR=+0.023 PF= 1.40 | TEST_INSTR n= 621 win= 66.7% avgR=+0.021 PF= 1.39
+4h SNP                     | TRAIN      n= 586 win= 87.2% avgR=+0.015 PF= 1.11 | TEST_TIME  n= 338 win= 88.8% avgR=+0.042 PF= 1.39 | TEST_INSTR n= 531 win= 85.1% avgR=+0.018 PF= 1.14
+4h HP                      | TRAIN      n= 467 win= 80.5% avgR=+0.075 PF= 1.38 | TEST_TIME  n= 287 win= 78.7% avgR=+0.035 PF= 1.16 | TEST_INSTR n= 444 win= 78.6% avgR=+0.025 PF= 1.11
+4h BAL                     | TRAIN      n= 346 win= 59.0% avgR=+0.242 PF= 1.58 | TEST_TIME  n= 204 win= 58.8% avgR=+0.200 PF= 1.47 | TEST_INSTR n= 335 win= 57.9% avgR=+0.173 PF= 1.40
+4h RUN                     | TRAIN      n= 309 win= 44.0% avgR=+0.265 PF= 1.56 | TEST_TIME  n= 173 win= 42.8% avgR=+0.231 PF= 1.48 | TEST_INSTR n= 299 win= 40.5% avgR=+0.185 PF= 1.36
+
+[D] the price of a high win rate: first target k1 (R), share closed w1; 1D, Direction Auto, BE + trail
+k1=0.05 close 100%         | TRAIN      n= 868 win= 95.7% avgR=-0.003 PF= 0.93 | TEST_TIME  n= 603 win= 95.2% avgR=-0.009 PF= 0.82 | TEST_INSTR n=1139 win= 95.5% avgR=-0.006 PF= 0.86
+k1=0.05 close  75%         | TRAIN      n= 655 win= 94.2% avgR=+0.026 PF= 1.48 | TEST_TIME  n= 442 win= 95.0% avgR=+0.026 PF= 1.58 | TEST_INSTR n= 884 win= 95.1% avgR=+0.025 PF= 1.61
+k1=0.05 close  50%         | TRAIN      n= 600 win= 92.7% avgR=+0.072 PF= 2.40 | TEST_TIME  n= 412 win= 93.4% avgR=+0.062 PF= 2.51 | TEST_INSTR n= 819 win= 93.7% avgR=+0.059 PF= 2.44
+k1=0.10 close  50%         | TRAIN      n= 549 win= 92.3% avgR=+0.093 PF= 2.33 | TEST_TIME  n= 380 win= 91.1% avgR=+0.057 PF= 1.71 | TEST_INSTR n= 732 win= 92.1% avgR=+0.071 PF= 2.01
+k1=0.15 close  50%         | TRAIN      n= 489 win= 90.4% avgR=+0.116 PF= 2.22 | TEST_TIME  n= 356 win= 88.5% avgR=+0.057 PF= 1.50 | TEST_INSTR n= 659 win= 89.7% avgR=+0.086 PF= 1.89
+k1=0.30 close  50%         | TRAIN      n= 383 win= 82.2% avgR=+0.168 PF= 1.95 | TEST_TIME  n= 292 win= 81.5% avgR=+0.101 PF= 1.55 | TEST_INSTR n= 539 win= 82.0% avgR=+0.121 PF= 1.67
+k1=0.50 close  50%         | TRAIN      n= 341 win= 75.1% avgR=+0.209 PF= 1.82 | TEST_TIME  n= 258 win= 72.9% avgR=+0.129 PF= 1.47 | TEST_INSTR n= 486 win= 74.3% avgR=+0.154 PF= 1.60
+k1=1.00 close  50%         | TRAIN      n= 305 win= 61.6% avgR=+0.336 PF= 1.86 | TEST_TIME  n= 231 win= 59.3% avgR=+0.208 PF= 1.51 | TEST_INSTR n= 432 win= 60.2% avgR=+0.244 PF= 1.60
+Trend Runner (1R/2R/8R)    | TRAIN      n= 262 win= 46.6% avgR=+0.447 PF= 1.97 | TEST_TIME  n= 193 win= 46.6% avgR=+0.361 PF= 1.77 | TEST_INSTR n= 367 win= 47.4% avgR=+0.375 PF= 1.84
+
+[E] same frontier on 4H
+k1=0.05 close 100%         | TRAIN      n= 951 win= 92.2% avgR=-0.030 PF= 0.51 | TEST_TIME  n= 541 win= 89.8% avgR=-0.028 PF= 0.50 | TEST_INSTR n= 883 win= 85.7% avgR=-0.027 PF= 0.48
+k1=0.05 close  50%         | TRAIN      n= 705 win= 74.2% avgR=+0.003 PF= 1.05 | TEST_TIME  n= 402 win= 66.4% avgR=+0.023 PF= 1.40 | TEST_INSTR n= 621 win= 66.7% avgR=+0.021 PF= 1.39
+k1=0.15 close  50%         | TRAIN      n= 586 win= 87.2% avgR=+0.015 PF= 1.11 | TEST_TIME  n= 338 win= 88.8% avgR=+0.042 PF= 1.39 | TEST_INSTR n= 531 win= 85.1% avgR=+0.018 PF= 1.14
+k1=0.30 close  50%         | TRAIN      n= 467 win= 80.5% avgR=+0.075 PF= 1.38 | TEST_TIME  n= 287 win= 78.7% avgR=+0.035 PF= 1.16 | TEST_INSTR n= 444 win= 78.6% avgR=+0.025 PF= 1.11
+k1=1.00 close  50%         | TRAIN      n= 367 win= 57.8% avgR=+0.182 PF= 1.42 | TEST_TIME  n= 205 win= 57.6% avgR=+0.167 PF= 1.38 | TEST_INSTR n= 339 win= 57.5% avgR=+0.154 PF= 1.35
+Trend Runner (1R/2R/8R)    | TRAIN      n= 309 win= 44.0% avgR=+0.265 PF= 1.56 | TEST_TIME  n= 173 win= 42.8% avgR=+0.231 PF= 1.48 | TEST_INSTR n= 299 win= 40.5% avgR=+0.185 PF= 1.36
+
+[F] v2 defaults by asset class, 4H + 1D
+metal                      | TRAIN      n= 125 win= 82.4% avgR=+0.145 PF= 1.81 | TEST_TIME  n=  95 win= 82.1% avgR=+0.134 PF= 1.74 | TEST_INSTR n=  75 win= 80.0% avgR=+0.157 PF= 1.77
+energy                     | TRAIN      n=  90 win= 76.7% avgR=-0.063 PF= 0.73 | TEST_TIME  n=  59 win= 78.0% avgR=+0.077 PF= 1.36 | TEST_INSTR n=  71 win= 78.9% avgR=-0.000 PF= 1.00
+fx                         | TRAIN      n= 211 win= 82.9% avgR=+0.083 PF= 1.47 | TEST_TIME  n= 125 win= 71.2% avgR=-0.105 PF= 0.65 | TEST_INSTR n= 219 win= 79.0% avgR=+0.019 PF= 1.09
+index                      | TRAIN      n=  82 win= 81.7% avgR=+0.289 PF= 2.55 | TEST_TIME  n=  55 win= 90.9% avgR=+0.161 PF= 2.73 | TEST_INSTR n= 260 win= 79.6% avgR=+0.038 PF= 1.19
+stock                      | TRAIN      n= 147 win= 85.7% avgR=+0.204 PF= 2.47 | TEST_TIME  n= 120 win= 83.3% avgR=+0.125 PF= 1.76 | TEST_INSTR n= 167 win= 83.8% avgR=+0.208 PF= 2.27
+crypto                     | TRAIN      n= 132 win= 47.0% avgR=+0.400 PF= 1.86 | TEST_TIME  n=  73 win= 53.4% avgR=+0.489 PF= 2.22 | TEST_INSTR n= 133 win= 45.9% avgR=+0.339 PF= 1.72
+
+[G] gold (all feeds), v1 Both vs v2 Auto per profile
+OANDA_XAUUSD_5m v1 default     n=   13 win= 84.6% [57.8,95.7] tp1= 84.6% avgR=+0.134 PF= 1.83 net=    +1.7R maxDD=  2.0R
+OANDA_XAUUSD_5m v2 SHD         n=   10 win= 10.0% [ 1.8,40.4] tp1=100.0% avgR=+0.048 PF= 2.95 net=    +0.5R maxDD=  0.1R
+OANDA_XAUUSD_5m v2 SNP         n=   10 win= 90.0% [59.6,98.2] tp1= 90.0% avgR=-0.009 PF= 0.91 net=    -0.1R maxDD=  1.0R
+OANDA_XAUUSD_5m v2 HP          n=    6 win= 83.3% [43.6,97.0] tp1= 83.3% avgR=+0.169 PF= 1.96 net=    +1.0R maxDD=  1.1R
+OANDA_XAUUSD_5m v2 RUN         n=    6 win= 50.0% [18.8,81.2] tp1= 50.0% avgR=+0.265 PF= 1.50 net=    +1.6R maxDD=  2.1R
+YF_GOLD_5m v1 default          n=   33 win= 78.8% [62.2,89.3] tp1= 78.8% avgR=+0.009 PF= 1.04 net=    +0.3R maxDD=  4.3R
+YF_GOLD_5m v2 SHD              n=   15 win= 13.3% [ 3.7,37.9] tp1= 93.3% avgR=-0.039 PF= 0.57 net=    -0.6R maxDD=  1.2R
+YF_GOLD_5m v2 SNP              n=   14 win= 92.9% [68.5,98.7] tp1= 92.9% avgR=+0.006 PF= 1.09 net=    +0.1R maxDD=  1.0R
+YF_GOLD_5m v2 HP               n=   11 win= 90.9% [62.3,98.4] tp1= 90.9% avgR=+0.148 PF= 2.56 net=    +1.6R maxDD=  1.0R
+YF_GOLD_5m v2 RUN              n=    8 win= 37.5% [13.7,69.4] tp1= 50.0% avgR=+0.063 PF= 1.11 net=    +0.5R maxDD=  3.6R
+OANDA_XAUUSD_15m v1 default    n=   35 win= 77.1% [61.0,87.9] tp1= 77.1% avgR=+0.071 PF= 1.30 net=    +2.5R maxDD=  2.1R
+OANDA_XAUUSD_15m v2 SHD        n=   20 win= 20.0% [ 8.1,41.6] tp1= 85.0% avgR=-0.051 PF= 0.69 net=    -1.0R maxDD=  1.4R
+OANDA_XAUUSD_15m v2 SNP        n=   16 win= 75.0% [50.5,89.8] tp1= 75.0% avgR=-0.088 PF= 0.66 net=    -1.4R maxDD=  2.3R
+OANDA_XAUUSD_15m v2 HP         n=   12 win= 66.7% [39.1,86.2] tp1= 66.7% avgR=-0.055 PF= 0.84 net=    -0.7R maxDD=  2.1R
+OANDA_XAUUSD_15m v2 RUN        n=   10 win= 40.0% [16.8,68.7] tp1= 40.0% avgR=+0.024 PF= 1.04 net=    +0.2R maxDD=  2.1R
+YF_GOLD_15m v1 default         n=   18 win= 72.2% [49.1,87.5] tp1= 72.2% avgR=+0.070 PF= 1.24 net=    +1.3R maxDD=  2.2R
+YF_GOLD_15m v2 SHD             n=    7 win= 14.3% [ 2.6,51.3] tp1= 85.7% avgR=-0.060 PF= 0.62 net=    -0.4R maxDD=  1.0R
+YF_GOLD_15m v2 SNP             n=    5 win= 80.0% [37.6,96.4] tp1= 80.0% avgR=-0.040 PF= 0.81 net=    -0.2R maxDD=  1.0R
+YF_GOLD_15m v2 HP              n=    5 win= 40.0% [11.8,76.9] tp1= 40.0% avgR=-0.440 PF= 0.30 net=    -2.2R maxDD=  2.2R
+YF_GOLD_15m v2 RUN             n=    4 win= 25.0% [ 4.6,69.9] tp1= 25.0% avgR=-0.389 PF= 0.50 net=    -1.6R maxDD=  2.1R
+OANDA_XAUUSD_1h v1 default     n=   54 win= 74.1% [61.1,83.9] tp1= 74.1% avgR=-0.031 PF= 0.89 net=    -1.7R maxDD=  6.2R
+OANDA_XAUUSD_1h v2 SHD         n=   31 win= 96.8% [83.8,99.4] tp1= 96.8% avgR=+0.077 PF= 3.35 net=    +2.4R maxDD=  1.0R
+OANDA_XAUUSD_1h v2 SNP         n=   22 win= 90.9% [72.2,97.5] tp1= 90.9% avgR=+0.135 PF= 2.19 net=    +3.0R maxDD=  2.3R
+OANDA_XAUUSD_1h v2 HP          n=   22 win= 72.7% [51.8,86.8] tp1= 72.7% avgR=-0.006 PF= 0.98 net=    -0.1R maxDD=  4.5R
+OANDA_XAUUSD_1h v2 RUN         n=   14 win= 50.0% [26.8,73.2] tp1= 50.0% avgR=+0.248 PF= 1.46 net=    +3.5R maxDD=  5.6R
+YF_GOLD_1h v1 default          n=  134 win= 76.9% [69.0,83.2] tp1= 79.1% avgR=+0.032 PF= 1.15 net=    +4.3R maxDD=  5.6R
+YF_GOLD_1h v2 SHD              n=  131 win= 48.9% [40.5,57.3] tp1= 95.4% avgR=+0.009 PF= 1.16 net=    +1.2R maxDD=  3.4R
+YF_GOLD_1h v2 SNP              n=  106 win= 88.7% [81.2,93.4] tp1= 89.6% avgR=+0.033 PF= 1.30 net=    +3.5R maxDD=  3.3R
+YF_GOLD_1h v2 HP               n=   85 win= 81.2% [71.6,88.1] tp1= 81.2% avgR=+0.070 PF= 1.35 net=    +6.0R maxDD=  4.9R
+YF_GOLD_1h v2 RUN              n=   58 win= 43.1% [31.2,55.9] tp1= 60.3% avgR=+0.228 PF= 1.48 net=   +13.3R maxDD=  6.5R
+OANDA_XAUUSD_4h v1 default     n=   59 win= 88.1% [77.5,94.1] tp1= 89.8% avgR=+0.269 PF= 3.56 net=   +15.9R maxDD=  2.1R
+OANDA_XAUUSD_4h v2 SHD         n=   63 win= 88.9% [78.8,94.5] tp1= 95.2% avgR=+0.099 PF= 3.02 net=    +6.2R maxDD=  2.0R
+OANDA_XAUUSD_4h v2 SNP         n=   57 win= 91.2% [81.1,96.2] tp1= 91.2% avgR=+0.117 PF= 2.31 net=    +6.7R maxDD=  1.9R
+OANDA_XAUUSD_4h v2 HP          n=   41 win= 90.2% [77.5,96.1] tp1= 90.2% avgR=+0.316 PF= 4.18 net=   +13.0R maxDD=  1.8R
+OANDA_XAUUSD_4h v2 RUN         n=   25 win= 68.0% [48.4,82.8] tp1= 84.0% avgR=+0.932 PF= 5.22 net=   +23.3R maxDD=  2.4R
+OANDA_XAUUSD_1D v1 default     n=   68 win= 80.9% [70.0,88.5] tp1= 82.4% avgR=+0.176 PF= 1.98 net=   +12.0R maxDD=  4.1R
+OANDA_XAUUSD_1D v2 SHD         n=   81 win= 98.8% [93.3,99.8] tp1= 98.8% avgR=+0.128 PF=11.31 net=   +10.4R maxDD=  1.0R
+OANDA_XAUUSD_1D v2 SNP         n=   67 win= 92.5% [83.7,96.8] tp1= 92.5% avgR=+0.151 PF= 3.01 net=   +10.1R maxDD=  2.0R
+OANDA_XAUUSD_1D v2 HP          n=   52 win= 84.6% [72.5,92.0] tp1= 84.6% avgR=+0.237 PF= 2.53 net=   +12.3R maxDD=  3.0R
+OANDA_XAUUSD_1D v2 RUN         n=   35 win= 54.3% [38.2,69.5] tp1= 68.6% avgR=+0.569 PF= 2.55 net=   +19.9R maxDD=  3.0R
+
+[H] 5-minute charts: guard and cost sensitivity (v2 Direction Auto, profile Auto)
+5m guard ON, Auto cost         n=  255 win= 61.2% [55.1,67.0] tp1= 68.6% avgR=-0.029 PF= 0.92 net=    -7.4R maxDD= 18.6R
+5m guard OFF, Auto cost        n= 1284 win= 40.0% [37.3,42.7] tp1= 62.5% avgR=-0.213 PF= 0.60 net=  -273.7R maxDD=284.6R
+5m guard OFF, 1/3 cost         n= 1284 win= 49.9% [47.2,52.7] tp1= 62.5% avgR=-0.073 PF= 0.84 net=   -93.3R maxDD=109.2R
+5m guard OFF, ZERO cost        n= 1284 win= 52.5% [49.8,55.2] tp1= 62.5% avgR=-0.002 PF= 0.99 net=    -3.2R maxDD= 40.2R
+   metal: guard OFF, zero cost n=  117 win= 70.9% [62.2,78.4] tp1= 70.9% avgR=-0.110 PF= 0.65 net=   -12.9R maxDD= 13.4R
+   energy: guard OFF, zero cost n=   88 win= 77.3% [67.5,84.8] tp1= 78.4% avgR=+0.010 PF= 1.04 net=    +0.8R maxDD=  3.8R
+   fx: guard OFF, zero cost    n=  257 win= 74.7% [69.1,79.6] tp1= 74.7% avgR=-0.019 PF= 0.93 net=    -4.9R maxDD= 11.5R
+   index: guard OFF, zero cost n=  108 win= 78.7% [70.1,85.4] tp1= 78.7% avgR=+0.077 PF= 1.36 net=    +8.3R maxDD=  6.0R
+   stock: guard OFF, zero cost n=   36 win= 69.4% [53.1,82.0] tp1= 69.4% avgR=-0.082 PF= 0.73 net=    -3.0R maxDD=  3.6R
+   crypto: guard OFF, zero cost n=  678 win= 32.6% [29.2,36.2] tp1= 51.3% avgR=+0.012 PF= 1.02 net=    +8.4R maxDD= 34.9R
+15m / 1h for reference (guard ON below 1H, Auto cost):
+15m v2 default                 n=  201 win= 46.3% [39.5,53.2] tp1= 56.7% avgR=-0.118 PF= 0.76 net=   -23.8R maxDD= 26.8R
+15m v2, zero cost              n=  531 win= 53.3% [49.0,57.5] tp1= 60.5% avgR=-0.005 PF= 0.99 net=    -2.7R maxDD= 19.5R
+1h v2 default                  n= 2055 win= 61.9% [59.8,64.0] tp1= 67.3% avgR=-0.014 PF= 0.96 net=   -28.8R maxDD= 63.5R
+1h v2, zero cost               n= 2055 win= 62.8% [60.7,64.8] tp1= 67.3% avgR=+0.034 PF= 1.10 net=   +68.9R maxDD= 29.5R

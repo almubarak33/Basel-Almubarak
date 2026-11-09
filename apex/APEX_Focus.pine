@@ -52,7 +52,7 @@ useFlip     = input.bool(true,  "Trigger: SuperTrend flip · factor · ATR lengt
 stFactor    = input.float(3.0, "", minval = 0.5, step = 0.1, group = G_SIG, inline = "t2")
 stLen       = input.int(10, "", minval = 1, group = G_SIG, inline = "t2")
 usePb       = input.bool(true,  "Trigger: trend pullback resume", group = G_SIG)
-minScore    = input.int(7, "Minimum confluence score (0-7)", minval = 0, maxval = 7, group = G_SIG, tooltip = "7/7 counts aligned conditions (HTF trend, EMA200 side, EMA21/55 order, ADX threshold, ADX rising, DI alignment, RSI side); it is not a calibrated win probability. In the backtests the score state itself carried the edge on 4H/1D long trades; the trigger added almost nothing.")
+minScore    = input.int(7, "Minimum confluence score (0-7)", minval = 0, maxval = 7, group = G_SIG, tooltip = "7/7 counts aligned conditions (HTF trend, EMA200 side, EMA21/55 order, ADX above the threshold, ADX rising = above its value 3 bars ago and above 18, DI alignment, RSI side). The two ADX conditions are not directional and count for both sides. The score is not a calibrated win probability. In the backtests the score state itself carried the edge on 4H/1D long trades; the trigger added almost nothing.")
 adxMin      = input.float(25.0, "ADX trend threshold", minval = 5, step = 1, group = G_SIG)
 useTsm      = input.bool(true, "Momentum ensemble must agree (TSMOM 20/50/100/200)", group = G_SIG, tooltip = "Price must be above (long) / below (short) its close 20, 50, 100 and 200 bars ago.")
 dirMode     = input.string(DIR_AUTO, "Direction", options = [DIR_AUTO, "Both", "Long only", "Short only"], group = G_SIG, tooltip = "Auto: long only, except forex symbols where both sides trade. In the backtests (about 100 series, 5m to 1D) short trades lost money on metals, energy, indices and stocks and were flat on forex and crypto, on the tuning data and on unseen data alike.")
@@ -103,7 +103,7 @@ zoneCount   = input.int(3, "", minval = 1, maxval = 10, group = G_STR, inline = 
 
 showDash    = input.bool(true, "Statistics panel · position", group = G_DASH, inline = "dash", tooltip = "Results of the internal simulation over the bars loaded on this chart, after the cost below. They describe the past of this chart only.")
 dashPosIn   = input.string("Top right", "", options = ["Top right", "Top left", "Middle right", "Bottom right", "Bottom left"], group = G_DASH, inline = "dash")
-costMode    = input.string("Auto", "Round-trip cost · custom %", options = ["Auto", "Custom"], group = G_DASH, inline = "cost", tooltip = "Auto: 0.10% crypto, 0.06% silver/platinum/copper, 0.03% otherwise. The cost is subtracted from every trade's R and drives the small-frame guard. Use Custom with your broker's real spread + commission.")
+costMode    = input.string("Auto", "Round-trip cost · custom %", options = ["Auto", "Custom"], group = G_DASH, inline = "cost", tooltip = "Auto: 0.10% crypto, 0.06% when the ticker contains XAG / SILVER / XPT / PLATINUM / XCU / COPPER, 0.03% otherwise. The cost is subtracted from every trade's R and drives the small-frame guard. Use Custom with your broker's real spread + commission.")
 costCustom  = input.float(0.05, "", minval = 0, step = 0.01, group = G_DASH, inline = "cost")
 
 acct        = input.float(10000, "Account size · risk %", minval = 0, group = G_SIZE, inline = "acc")
@@ -217,8 +217,11 @@ bool allowShort = dirMode == DIR_AUTO ? syminfo.type == "forex" : dirMode != "Lo
 float slDistL = math.min(math.max(close - (ta.lowest(low, swingLook) - slBuf * atr), slMinAtr * atr), slMaxAtr * atr)
 float slDistS = math.min(math.max((ta.highest(high, swingLook) + slBuf * atr) - close, slMinAtr * atr), slMaxAtr * atr)
 
-bool hiCostMetal = str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "SILVER") or str.contains(syminfo.ticker, "XPT") or str.contains(syminfo.ticker, "XCU")
-float costPct = costMode == "Auto" ? (syminfo.type == "crypto" ? 0.10 : hiCostMetal ? 0.06 : 0.03) : costCustom
+// Crypto pairs are typed "crypto", "spot" (exchange spot pairs) or "swap" (perpetuals) depending on the symbol.
+bool isCrypto = syminfo.type == "crypto" or syminfo.type == "spot" or syminfo.type == "swap"
+string tickerUp = str.upper(syminfo.ticker)
+bool hiCostMetal = str.contains(tickerUp, "XAG") or str.contains(tickerUp, "SILVER") or str.contains(tickerUp, "XPT") or str.contains(tickerUp, "PLATINUM") or str.contains(tickerUp, "XCU") or str.contains(tickerUp, "COPPER")
+float costPct = costMode == "Auto" ? (isCrypto ? 0.10 : hiCostMetal ? 0.06 : 0.03) : costCustom
 // Small-frame guard: below 1H a tight stop makes the estimated cost a large share of the risk.
 bool smallTf = timeframe.in_seconds() < 3600
 float cgMinDist = costPct / 100 * close / (cgMaxPct / 100)
@@ -238,7 +241,7 @@ float chandL  = ta.highest(high, chLen) - chMult * atr
 float chandS  = ta.lowest(low, chLen) + chMult * atr
 
 // Management profile
-string profile = profileIn == PROF_AUTO ? (syminfo.type == "crypto" ? PROF_RUN : PROF_HP) : profileIn
+string profile = profileIn == PROF_AUTO ? (isCrypto ? PROF_RUN : PROF_HP) : profileIn
 float k1 = profile == PROF_SHD ? 0.05 : profile == PROF_SNP ? 0.15 : profile == PROF_HP ? 0.3 : profile == PROF_BAL ? 1.0 : profile == PROF_RUN ? 1.0 : cTp1
 float k2 = profile == PROF_SHD ? 1.5 : profile == PROF_SNP ? 1.5 : profile == PROF_HP ? 1.5 : profile == PROF_BAL ? 2.0 : profile == PROF_RUN ? 2.0 : cTp2
 float k3 = profile == PROF_SHD ? 4.0 : profile == PROF_SNP ? 4.0 : profile == PROF_HP ? 4.0 : profile == PROF_BAL ? 3.0 : profile == PROF_RUN ? 8.0 : cTp3

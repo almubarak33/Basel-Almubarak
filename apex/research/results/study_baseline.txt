@@ -1,0 +1,39 @@
+=== default inputs (profile Auto: crypto -> Trend Runner, others -> High-Probability) ===
+-- by timeframe (all cells pooled)
+5m         ALL        n=  556 win= 58.5% [54.3,62.5] tp1= 68.0% avgR=-0.052 PF= 0.86 net=   -28.7R maxDD=  45.8R t=-1.4
+15m        ALL        n=  457 win= 49.9% [45.3,54.5] tp1= 61.1% avgR=-0.049 PF= 0.89 net=   -22.5R maxDD=  38.8R t=-1.0
+1h         ALL        n= 3361 win= 57.6% [55.9,59.3] tp1= 65.6% avgR=-0.014 PF= 0.96 net=   -47.1R maxDD=  68.2R t=-0.8
+4h         ALL        n= 1593 win= 63.4% [61.0,65.7] tp1= 69.1% avgR=+0.058 PF= 1.17 net=   +91.8R maxDD=  42.0R t=+2.4
+1D         ALL        n= 1654 win= 77.7% [75.6,79.6] tp1= 79.3% avgR=+0.096 PF= 1.45 net=  +158.9R maxDD=  11.7R t=+5.6
+-- by timeframe, non-crypto only (High-Probability profile)
+5m         ALL        n=  339 win= 74.0% [69.1,78.4] tp1= 75.5% avgR=-0.080 PF= 0.70 net=   -27.2R maxDD=  30.1R t=-2.4
+15m        ALL        n=  198 win= 73.2% [66.7,78.9] tp1= 75.3% avgR=-0.026 PF= 0.91 net=    -5.2R maxDD=  16.8R t=-0.5
+1h         ALL        n= 2012 win= 71.6% [69.6,73.5] tp1= 75.0% avgR=-0.061 PF= 0.77 net=  -122.3R maxDD= 129.2R t=-4.3
+4h         ALL        n= 1045 win= 75.1% [72.4,77.6] tp1= 76.7% avgR=-0.015 PF= 0.94 net=   -16.2R maxDD=  33.0R t=-0.8
+1D         ALL        n= 1574 win= 79.3% [77.2,81.2] tp1= 80.4% avgR=+0.082 PF= 1.41 net=  +129.2R maxDD=  11.7R t=+5.1
+-- by timeframe, crypto only (Trend Runner profile)
+5m         ALL        n=  217 win= 34.1% [28.1,40.6] tp1= 56.2% avgR=-0.007 PF= 0.99 net=    -1.5R maxDD=  26.6R t=-0.1
+15m        ALL        n=  259 win= 32.0% [26.7,38.0] tp1= 50.2% avgR=-0.067 PF= 0.89 net=   -17.2R maxDD=  33.3R t=-0.9
+1h         ALL        n= 1349 win= 36.7% [34.2,39.3] tp1= 51.6% avgR=+0.056 PF= 1.10 net=   +75.2R maxDD=  40.4R t=+1.6
+4h         ALL        n=  548 win= 41.1% [37.0,45.2] tp1= 54.4% avgR=+0.197 PF= 1.39 net=  +108.0R maxDD=  16.8R t=+3.4
+1D         ALL        n=   80 win= 46.2% [35.7,57.1] tp1= 57.5% avgR=+0.371 PF= 1.80 net=   +29.7R maxDD=   8.4R t=+2.3
+-- by asset class, 4h + 1D
+crypto     ALL        n=  628 win= 41.7% [37.9,45.6] tp1= 54.8% avgR=+0.219 PF= 1.44 net=  +137.7R maxDD=  19.8R t=+4.1
+energy     ALL        n=  368 win= 75.8% [71.2,79.9] tp1= 77.4% avgR=-0.014 PF= 0.94 net=    -5.1R maxDD=  16.3R t=-0.4
+fx         ALL        n=  555 win= 77.7% [74.0,80.9] tp1= 78.7% avgR=+0.012 PF= 1.06 net=    +6.9R maxDD=  20.1R t=+0.5
+index      ALL        n=  623 win= 76.4% [72.9,79.6] tp1= 77.7% avgR=+0.023 PF= 1.10 net=   +14.1R maxDD=  23.0R t=+0.9
+metal      ALL        n=  459 win= 77.3% [73.3,80.9] tp1= 79.1% avgR=+0.073 PF= 1.34 net=   +33.7R maxDD=   6.7R t=+2.4
+stock      ALL        n=  614 win= 80.1% [76.8,83.1] tp1= 81.1% avgR=+0.103 PF= 1.53 net=   +63.5R maxDD=   8.5R t=+4.0
+-- by trigger, non-crypto
+BRK        ALL        n= 4307 win= 75.2% [73.9,76.4] tp1= 77.3% avgR=-0.004 PF= 0.98 net=   -17.6R maxDD= 151.2R t=-0.4
+FLIP       ALL        n=   63 win= 69.8% [57.6,79.8] tp1= 73.0% avgR=-0.064 PF= 0.77 net=    -4.0R maxDD=   9.3R t=-0.8
+PB         ALL        n=  798 win= 73.7% [70.5,76.6] tp1= 75.9% avgR=-0.025 PF= 0.90 net=   -20.1R maxDD=  37.2R t=-1.1
+-- by direction, non-crypto
+long       ALL        n= 2967 win= 76.6% [75.1,78.1] tp1= 78.6% avgR=+0.031 PF= 1.14 net=   +93.3R maxDD=  63.0R t=+2.7
+short      ALL        n= 2201 win= 72.6% [70.7,74.4] tp1= 74.9% avgR=-0.061 PF= 0.77 net=  -135.1R maxDD= 150.6R t=-4.5
+-- gold
+OANDA_XAUUSD_15m ALL        n=   35 win= 77.1% [61.0,87.9] tp1= 77.1% avgR=+0.071 PF= 1.30 net=    +2.5R maxDD=   2.1R t=+0.6
+OANDA_XAUUSD_1D ALL        n=   68 win= 80.9% [70.0,88.5] tp1= 82.4% avgR=+0.176 PF= 1.98 net=   +12.0R maxDD=   4.1R t=+2.2
+OANDA_XAUUSD_4h ALL        n=   59 win= 88.1% [77.5,94.1] tp1= 89.8% avgR=+0.269 PF= 3.56 net=   +15.9R maxDD=   2.1R t=+3.7
+YF_GOLD_1h ALL        n=  134 win= 76.9% [69.0,83.2] tp1= 79.1% avgR=+0.032 PF= 1.15 net=    +4.3R maxDD=   5.6R t=+0.6
+YF_GOLD_5m ALL        n=   33 win= 78.8% [62.2,89.3] tp1= 78.8% avgR=+0.009 PF= 1.04 net=    +0.3R maxDD=   4.3R t=+0.1

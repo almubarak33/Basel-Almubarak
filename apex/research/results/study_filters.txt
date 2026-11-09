@@ -1,0 +1,47 @@
+('4h', '1D'): 2402 long trades; TRAIN=851 TEST=1551
+baseline win rate: TRAIN 60.5%  TEST 59.3%
+ext_ema21      TRAIN quintile cuts: 2.37, 2.77, 3.25, 3.92
+   TRAIN | Q1 n= 170 win=57.6% | Q2 n= 170 win=58.2% | Q3 n= 170 win=54.7% | Q4 n= 170 win=60.0% | Q5 n= 171 win=71.9%
+   TEST  | Q1 n= 408 win=56.4% | Q2 n= 300 win=57.3% | Q3 n= 325 win=60.3% | Q4 n= 292 win=62.3% | Q5 n= 226 win=61.5%
+ext_ema200     TRAIN quintile cuts: 5.65, 7.19, 8.76, 11.21
+   TRAIN | Q1 n= 170 win=54.1% | Q2 n= 170 win=56.5% | Q3 n= 170 win=64.1% | Q4 n= 170 win=61.8% | Q5 n= 171 win=66.1%
+   TEST  | Q1 n= 328 win=54.9% | Q2 n= 322 win=64.3% | Q3 n= 332 win=57.2% | Q4 n= 340 win=60.6% | Q5 n= 229 win=59.4%
+adx            TRAIN quintile cuts: 26.95, 30.38, 36.23, 44.75
+   TRAIN | Q1 n= 170 win=64.7% | Q2 n= 170 win=55.9% | Q3 n= 170 win=58.8% | Q4 n= 170 win=60.6% | Q5 n= 171 win=62.6%
+   TEST  | Q1 n= 287 win=64.1% | Q2 n= 372 win=58.9% | Q3 n= 325 win=59.7% | Q4 n= 287 win=59.9% | Q5 n= 280 win=53.6%
+rsi            TRAIN quintile cuts: 69.95, 73.25, 76.22, 80.32
+   TRAIN | Q1 n= 170 win=60.6% | Q2 n= 170 win=58.8% | Q3 n= 170 win=57.6% | Q4 n= 170 win=60.6% | Q5 n= 171 win=64.9%
+   TEST  | Q1 n= 320 win=54.4% | Q2 n= 319 win=59.6% | Q3 n= 310 win=58.1% | Q4 n= 319 win=65.8% | Q5 n= 283 win=58.3%
+atr_rank250    TRAIN quintile cuts: 0.11, 0.31, 0.52, 0.75
+   TRAIN | Q1 n= 163 win=59.5% | Q2 n= 177 win=62.7% | Q3 n= 167 win=54.5% | Q4 n= 172 win=65.7% | Q5 n= 172 win=59.9%
+   TEST  | Q1 n= 348 win=61.2% | Q2 n= 315 win=60.0% | Q3 n= 279 win=53.0% | Q4 n= 253 win=63.2% | Q5 n= 356 win=58.7%
+stop_in_atr    TRAIN quintile cuts: 3.50, 3.50, 3.50, 3.50
+   TRAIN | Q1 n= 170 win=56.5% | Q2 n=  79 win=69.6% | Q5 n= 602 win=60.5%
+   TEST  | Q1 n= 432 win=58.3% | Q2 n= 119 win=63.0% | Q5 n=1000 win=59.2%
+bar_range      TRAIN quintile cuts: 0.96, 1.25, 1.54, 2.03
+   TRAIN | Q1 n= 170 win=62.4% | Q2 n= 170 win=59.4% | Q3 n= 170 win=60.6% | Q4 n= 170 win=58.2% | Q5 n= 171 win=62.0%
+   TEST  | Q1 n= 344 win=61.0% | Q2 n= 301 win=56.1% | Q3 n= 275 win=62.9% | Q4 n= 326 win=55.5% | Q5 n= 305 win=61.0%
+body           TRAIN quintile cuts: 0.52, 0.67, 0.79, 0.88
+   TRAIN | Q1 n= 170 win=52.4% | Q2 n= 170 win=58.8% | Q3 n= 170 win=61.2% | Q4 n= 170 win=61.2% | Q5 n= 171 win=69.0%
+   TEST  | Q1 n= 362 win=60.8% | Q2 n= 311 win=58.2% | Q3 n= 342 win=58.8% | Q4 n= 294 win=57.8% | Q5 n= 242 win=60.7%
+close_pos      TRAIN quintile cuts: 0.70, 0.83, 0.90, 0.96
+   TRAIN | Q1 n= 170 win=55.9% | Q2 n= 170 win=60.0% | Q3 n= 170 win=64.7% | Q4 n= 170 win=58.2% | Q5 n= 171 win=63.7%
+   TEST  | Q1 n= 342 win=59.6% | Q2 n= 302 win=57.9% | Q3 n= 283 win=58.0% | Q4 n= 352 win=59.1% | Q5 n= 272 win=61.8%
+mom20          TRAIN quintile cuts: 3.58, 4.66, 5.65, 6.81
+   TRAIN | Q1 n= 170 win=60.6% | Q2 n= 170 win=60.6% | Q3 n= 170 win=52.9% | Q4 n= 170 win=60.6% | Q5 n= 171 win=67.8%
+   TEST  | Q1 n= 367 win=57.5% | Q2 n= 304 win=59.2% | Q3 n= 330 win=56.1% | Q4 n= 284 win=59.9% | Q5 n= 266 win=65.0%
+breakout_size  TRAIN quintile cuts: 0.15, 0.36, 0.61, 1.03
+   TRAIN | Q1 n= 170 win=61.8% | Q2 n= 170 win=57.6% | Q3 n= 170 win=58.8% | Q4 n= 170 win=64.1% | Q5 n= 171 win=60.2%
+   TEST  | Q1 n= 366 win=62.0% | Q2 n= 309 win=52.4% | Q3 n= 279 win=58.4% | Q4 n= 295 win=62.7% | Q5 n= 302 win=60.3%
+volume_ratio   TRAIN quintile cuts: 0.93, 1.14, 1.40, 1.91
+   TRAIN | Q1 n= 167 win=56.3% | Q2 n= 167 win=67.1% | Q3 n= 167 win=56.9% | Q4 n= 167 win=59.9% | Q5 n= 167 win=62.3%
+   TEST  | Q1 n= 388 win=61.6% | Q2 n= 276 win=59.8% | Q3 n= 271 win=57.6% | Q4 n= 300 win=54.0% | Q5 n= 307 win=62.2%
+trend_age      TRAIN quintile cuts: 11.00, 23.00, 39.00, 62.00
+   TRAIN | Q1 n= 154 win=70.8% | Q2 n= 175 win=60.0% | Q3 n= 174 win=59.8% | Q4 n= 172 win=55.8% | Q5 n= 176 win=57.4%
+   TEST  | Q1 n= 244 win=58.6% | Q2 n= 318 win=65.1% | Q3 n= 331 win=56.2% | Q4 n= 311 win=61.4% | Q5 n= 347 win=55.3%
+di_spread      TRAIN quintile cuts: 20.09, 24.91, 29.08, 35.97
+   TRAIN | Q1 n= 170 win=56.5% | Q2 n= 170 win=58.8% | Q3 n= 170 win=60.6% | Q4 n= 170 win=57.1% | Q5 n= 171 win=69.6%
+   TEST  | Q1 n= 357 win=59.7% | Q2 n= 373 win=55.2% | Q3 n= 287 win=58.5% | Q4 n= 305 win=63.3% | Q5 n= 229 win=60.7%
+ema_gap        TRAIN quintile cuts: 1.21, 1.63, 2.03, 2.59
+   TRAIN | Q1 n= 170 win=57.6% | Q2 n= 170 win=63.5% | Q3 n= 170 win=60.0% | Q4 n= 170 win=55.3% | Q5 n= 171 win=66.1%
+   TEST  | Q1 n= 313 win=55.3% | Q2 n= 318 win=64.8% | Q3 n= 325 win=59.7% | Q4 n= 323 win=58.5% | Q5 n= 272 win=57.7%
