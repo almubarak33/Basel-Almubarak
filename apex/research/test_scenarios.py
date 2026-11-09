@@ -401,6 +401,14 @@ def run_remaining_sl_gap_open(E):
 
 
 @check("sim")
+def run_gap_tp1_has_no_breakeven(E):
+    # bar1 (111,112,99,105): L407 open 111 >= tp1 110 -> hit1 at the opening (0.33, openW 0.67).  beOn is false
+    # for Trend Runner (L218) and the trail waits for TP2 (L217) -> sl stays 90 ; low 99 > 90 -> still open.
+    res = sim(E, [FLAT, (111, 112, 99, 105)], longs={0: 10}, mgmt=RUN, chandL=[105, 105])
+    expect(res, [], stats(), open_trade(1, 0, 100, 10, RUN, hits=(True, False, False)))
+
+
+@check("sim")
 def run_tp3_runner(E):
     # bar1 (101,121,100,120): TP1 + TP2 -> realized 0.99, openW 0.34, sl 110.
     # bar2 (120,181,119,180): na chandelier -> sl 110 ; L474 high 181 >= 180 -> hit3: 0.99 + 0.34 * 8 = 3.71.
@@ -425,6 +433,18 @@ def reversal_on_opposite_signal(E):
 
 
 @check("sim")
+def reversal_short_to_long(E):
+    # S(100,10).  bar1 (99,101,95,96) + longSig (dist 8): block 1: nothing.  L491: longSig and cur.dir == -1 ->
+    # closeTrade(cur, CLOSE 96, "Reverse"): realized = (96 - 100) * (-1) / 10 = 0.4 ; L(96,8): sl 88, tp1 104.
+    # bar2 (96,97,87,90): low 87 <= 88 -> px 88, "SL", R = -1.
+    res = sim(E, [FLAT, (99, 101, 95, 96), (96, 97, 87, 90)], shorts={0: 10}, longs={1: 8})
+    expect(res, [trade(-1, 0, 1, 100, 10, BAL, 96, "Reverse", 0.4),
+                 trade(1, 1, 2, 96, 8, BAL, 88, "SL", -1.0)],
+           stats(n=2, fullSl=1, win=1, gross=0.4, loss=1.0, net=-0.6, peak=0.4, maxDd=1.0,
+                 nL=1, netL=-1.0, nS=1, netS=0.4))
+
+
+@check("sim")
 def reversal_trade_not_managed_on_its_entry_bar(E):
     # bar1 (100,109,91,95) + shortSig (dist 4): the long survives block 1 (91 > 90, 109 < 110), is reversed at 95:
     # realized = (95 - 100) / 10 = -0.5.  New S(95,4): sl 99, tp1 91.  Bar 1's own high 109 / low 91 are NOT applied
@@ -442,6 +462,11 @@ def same_direction_signal_ignored(E):
     res = sim(E, [FLAT, (101, 106, 100, 105), (104, 105, 89, 90)], longs={0: 10, 1: 2})
     expect(res, [trade(1, 0, 2, 100, 10, BAL, 90, "SL", -1.0)],
            stats(n=1, fullSl=1, loss=1.0, net=-1.0, maxDd=1.0, nL=1, netL=-1.0))
+    # short mirror (L497 needs na(cur) or cur.dir == 1): the second shortSig on bar1 is ignored, the original
+    # S(100,10) is stopped at 110 on bar2.
+    res = sim(E, [FLAT, (99, 100, 94, 95), (96, 111, 95, 110)], shorts={0: 10, 1: 2})
+    expect(res, [trade(-1, 0, 2, 100, 10, BAL, 110, "SL", -1.0)],
+           stats(n=1, fullSl=1, loss=1.0, net=-1.0, maxDd=1.0, nS=1, netS=-1.0))
 
 
 @check("sim")
@@ -506,12 +531,17 @@ def trigger_name_and_score_are_recorded(E):
 
 @check("sim")
 def targets_touched_exactly(E):
-    # L454 / L463 are non-strict.  long: bar1 (101,110,100.5,109): high == tp1 110 -> hit1 (0.4, sl 100) ;
-    # bar2 (109,120,108,119): high == tp2 120 -> hit2 (1.0, sl 110).  The trade is still open.
-    res = sim(E, [FLAT, (101, 110, 100.5, 109), (109, 120, 108, 119)], longs={0: 10})
+    # L454 / L463 are non-strict.  long: bar1 (101,110,100.5,109): high == tp1 110 -> hit1 (0.4, sl 100).
+    res = sim(E, [FLAT, (101, 110, 100.5, 109)], longs={0: 10})
+    expect(res, [], stats(), open_trade(1, 0, 100, 10, BAL, hits=(True, False, False)))
+    # bar1 (101,111,100.5,109): hit1 ; bar2 (109,120,108,119): high == tp2 120 -> hit2.  Still open.
+    res = sim(E, [FLAT, (101, 111, 100.5, 109), (109, 120, 108, 119)], longs={0: 10})
     expect(res, [], stats(), open_trade(1, 0, 100, 10, BAL, hits=(True, True, False)))
-    # short: bar1 (99,99.5,90,91): low == tp1 90 ; bar2 (91,92,80,81): low == tp2 80.
-    res = sim(E, [FLAT, (99, 99.5, 90, 91), (91, 92, 80, 81)], shorts={0: 10})
+    # short: bar1 (99,99.5,90,91): low == tp1 90 -> hit1.
+    res = sim(E, [FLAT, (99, 99.5, 90, 91)], shorts={0: 10})
+    expect(res, [], stats(), open_trade(-1, 0, 100, 10, BAL, hits=(True, False, False)))
+    # bar1 (99,99.5,89,91): hit1 ; bar2 (91,92,80,81): low == tp2 80 -> hit2.
+    res = sim(E, [FLAT, (99, 99.5, 89, 91), (91, 92, 80, 81)], shorts={0: 10})
     expect(res, [], stats(), open_trade(-1, 0, 100, 10, BAL, hits=(True, True, False)))
 
 
@@ -683,8 +713,8 @@ def custom_weights_60_40_close_everything_at_tp2(E):
 @check("sim")
 def custom_weights_60_40_gap_open_above_tp2(E):
     # bar1 opens 125: L407 hit1 (0.6), L416 hit2 (+0.8 = 1.4, openW 0), L424 -> closeTrade(tp2, "TP") in the
-    # opening phase ; exit_px 120.
-    res = sim(E, [FLAT, (125, 140, 124, 139)], longs={0: 10}, mgmt=custom(0.6, 0.4))
+    # opening phase ; exit_px 120.  The later dip to 105 (below the stop moved to 110) no longer matters.
+    res = sim(E, [FLAT, (125, 140, 105, 139)], longs={0: 10}, mgmt=custom(0.6, 0.4))
     expect(res, [trade(1, 0, 1, 100, 10, BAL, 120, "TP", 1.4, hits=(True, True, False))],
            stats(n=1, tp1=1, tp2=1, win=1, gross=1.4, net=1.4, peak=1.4, nL=1, netL=1.4))
 
@@ -696,8 +726,9 @@ def custom_weights_100_0_close_everything_at_tp1(E):
     res = sim(E, [FLAT, (101, 125, 100.5, 124)], longs={0: 10}, mgmt=custom(1.0, 0.0))
     expect(res, [trade(1, 0, 1, 100, 10, BAL, 110, "TP", 1.0, hits=(True, False, False))],
            stats(n=1, tp1=1, win=1, gross=1.0, net=1.0, peak=1.0, nL=1, netL=1.0))
-    # the same at the opening (L407 -> L424-L425): bar1 opens at 125, the exit price is still tp1 110.
-    res = sim(E, [FLAT, (125, 126, 124, 125)], longs={0: 10}, mgmt=custom(1.0, 0.0))
+    # the same at the opening (L407 -> L424-L425): bar1 opens at 125, the exit price is still tp1 110 and the
+    # reason "TP" even though the bar later trades down to 99, below the breakeven stop.
+    res = sim(E, [FLAT, (125, 126, 99, 125)], longs={0: 10}, mgmt=custom(1.0, 0.0))
     expect(res, [trade(1, 0, 1, 100, 10, BAL, 110, "TP", 1.0, hits=(True, False, False))],
            stats(n=1, tp1=1, win=1, gross=1.0, net=1.0, peak=1.0, nL=1, netL=1.0))
 
@@ -742,6 +773,15 @@ def cost_turns_scratch_into_loss(E):
               cost=1.0)
     expect(res, [trade(1, 0, 2, 100, 10, BAL, 100, "BE/Trail", 0.0, cost=0.1, hits=(True, False, False))],
            stats(n=1, tp1=1, loss=0.1, net=-0.1, maxDd=0.1, costR=0.1, nL=1, netL=-0.1))
+
+
+@check("sim")
+def cost_larger_than_gross_is_a_loss(E):
+    # TP1 then breakeven (gross +0.4) with costPct 5.0: cR = 5 / 100 * 100 / 10 = 0.5 -> R = -0.1.
+    # win / gross / loss are decided on R AFTER cost (L330, L336-L338).
+    res = sim(E, [FLAT, (101, 111, 100, 108), (104, 106, 99, 100)], longs={0: 10}, cost=5.0)
+    expect(res, [trade(1, 0, 2, 100, 10, BAL, 100, "BE/Trail", 0.4, cost=0.5, hits=(True, False, False))],
+           stats(n=1, tp1=1, loss=0.1, net=-0.1, maxDd=0.1, costR=0.5, nL=1, netL=-0.1))
 
 
 @check("sim")
@@ -906,6 +946,21 @@ def ind_dmi(E):
 
 
 @check("indicator")
+def ind_dmi_outside_inside_bars(E):
+    # len = smoothing = 1 makes every rma the identity, so each bar can be checked on its own.
+    #   h 10 11 10.5 12 13 ; l 8 6 7 9 8 ; c 9 7 8 11 10
+    # bar1 outside bar: up 1, down 2 -> plusDM 0 (up < down), minusDM 2 ; tr = max(5, |11-9|, |6-9|) = 5
+    #       plus 0, minus 40 ; dx = 40/40 = 1 -> adx 100
+    # bar2 inside bar: up -0.5, down -1 -> both DM 0 ; tr 3.5 ; plus = minus = 0 ; sum == 0 -> dx = 0/1 -> adx 0
+    # bar3: up 1.5, down -2 -> plusDM 1.5 ; tr = max(3, |12-8|, 1) = 4 ; plus 37.5, minus 0 -> adx 100
+    # bar4: up 1, down 1 -> neither is strictly greater -> both DM 0 ; tr = max(5, 2, 3) = 5 -> 0, 0, adx 0
+    plus, minus, adx = i_dmi(E, [10, 11, 10.5, 12, 13], [8, 6, 7, 9, 8], [9, 7, 8, 11, 10], 1, 1)
+    close_arr(plus, [NAN, 0, 0, 37.5, 0], what="+DI")
+    close_arr(minus, [NAN, 40, 0, 0, 0], what="-DI")
+    close_arr(adx, [NAN, 100, 0, 100, 0], what="ADX")
+
+
+@check("indicator")
 def ind_supertrend(E):
     # factor 1, atr(2) = na 2.5 2.25 2.125 3.0625 3.03125 3.015625 ; hl2 = 9 10.5 12 11 13.5 12.5 10
     # bar0: bands na -> lower = upper = nz(prev) = 0 ; na(atr[1]) -> dir 1 ; st = upper = 0
@@ -984,6 +1039,12 @@ def chart_of(rows, tf):
             "l": a[:, 2].copy(), "c": a[:, 3].copy(), "v": np.zeros(len(rows))}
 
 
+def mirrored(chart, around=500.0):
+    """The same chart with every price p replaced by around - p: longs become shorts, highs become lows."""
+    return {"t": chart["t"], "o": around - chart["o"], "h": around - chart["l"], "l": around - chart["h"],
+            "c": around - chart["c"], "v": chart["v"]}
+
+
 def htf_of(chart, seconds=14400):
     return ds.resample_by_key(chart, [int(x) // seconds for x in chart["t"]])
 
@@ -1047,6 +1108,12 @@ def warm_is_bar_index_ge_250(E):
     assert np.flatnonzero(s["longSig"]).tolist() == [250] and not s["shortSig"].any()
     assert res["trades"] == [] and res["open_trade"]["entry_bar"] == 250 and res["open_trade"]["dir"] == 1
     assert res["open_trade"]["entry"] == 189.5 and res["stats"]["n"] == 0
+    # mirrored charts (a steady rise, then a crash bar): the same for shortSig (L203)
+    res, s = run_series(E, mirrored(jump_chart(249, 189.5)), mkt, **LOOSE)
+    assert not s["longSig"].any() and not s["shortSig"].any() and res["open_trade"] is None
+    res, s = run_series(E, mirrored(jump_chart(250, 189.5)), mkt, **LOOSE)
+    assert np.flatnonzero(s["shortSig"]).tolist() == [250] and not s["longSig"].any()
+    assert res["open_trade"]["entry_bar"] == 250 and res["open_trade"]["dir"] == -1
 
 
 @check("run")
@@ -1077,6 +1144,18 @@ def trigger_name_precedence(E):
     assert not s["longSig"].any() and res["open_trade"] is None
     res, s = run_series(E, chart, mkt, **LOOSE, dirMode="Long only")
     assert np.flatnonzero(s["longSig"]).tolist() == [280]
+    # short side on the mirrored chart: trigNameS (L184) has the same precedence
+    crash = mirrored(chart)
+    for kw, name in cases:
+        res, s = run_series(E, crash, mkt, **LOOSE, **kw)
+        assert np.flatnonzero(s["shortSig"]).tolist() == [280] and not s["longSig"].any(), kw
+        ot = res["open_trade"]
+        assert ot is not None and ot["dir"] == -1 and ot["entry_bar"] == 280 and ot["trig"] == name, (kw, ot)
+        assert ot["score"] == int(s["scoreS"][280]), (kw, ot)
+    res, s = run_series(E, crash, mkt, **LOOSE, dirMode="Long only")
+    assert not s["shortSig"].any() and not s["longSig"].any() and res["open_trade"] is None
+    res, s = run_series(E, crash, mkt, **LOOSE, dirMode="Short only")
+    assert np.flatnonzero(s["shortSig"]).tolist() == [280]
 
 
 @check("run")
@@ -1091,29 +1170,53 @@ def tsm_gate_needs_all_four_lookbacks(E):
         assert np.flatnonzero(s["longSig"]).tolist() == ([280] if fires else []), (jump_close, s["longSig"].sum())
         res2, s2 = run_series(E, jump_chart(280, jump_close), mkt, minScore=0, useTsm=False)
         assert np.flatnonzero(s2["longSig"]).tolist() == [280], jump_close
+        # mirrored: tsm = -0.5 / -0.75 / -1 -> tsmS (L188: tsm <= -1) only in the last case
+        res3, s3 = run_series(E, mirrored(jump_chart(280, jump_close)), mkt, minScore=0)
+        assert np.flatnonzero(s3["shortSig"]).tolist() == ([280] if fires else []), jump_close
+        assert not s3["longSig"].any()
 
 
-# Ramp-and-pullback chart (1h): only the pullback trigger can fire.
+# Ramp-and-pullback chart (1h): only the pullback trigger can fire, and every condition of L178 is isolated.
 #   bars 0 .. 269: close = 100 + i, open = close - 1, high = close + 0.2, low = open - 0.2
 #       tr = 1.4 on every bar ; ema21 = close - 10 exactly (the SMA seed of a ramp keeps the lag) ;
 #       brkUp is FALSE on every ramp bar: close > donHi, but close[1] = c-1 > donHi[1] = c-1.8 (L172 wants <=) ;
 #       touchUp is false: low - ema21 = 8.8 > 0 ; SuperTrend(10, 10) turns up on bar 23 and stays up
-#       (lower band = hl2 - 10*1.4 = close - 14.5, i.e. 354.5 on bar 269).
-#   bars 270 / 271 / 272 pull back: closes 366, 363, 360.5 (open = previous close, high = open + 0.2),
-#       lows 365.8, 362.8, 359.0.  ema21: 359.636, 359.942, 359.993 -> low[272] - ema21 = -0.99 <= 0 (touch).
-#       All closes stay above the lower band 354.5 -> no flip.
-#   bar 273: open 360.5, close 364.5, high 364.7, low 360.3:
-#       pbUp (L178): stDir < 0, touch within 5 bars, close > high[1] = 363.2, close > ema21 = 360.4, close > open
-#       brkUp: close 364.5 > donHi 369.2 is false ; flipUp: stDir[1] was already up -> false
-#   bars 274 .. 276: flat at 364.5 (close > high[1] fails) -> nothing.
-def pullback_chart():
+#       (lower band = hl2 - 10*1.4 = close - 14.5, i.e. 354.5 on bar 269 ; no later close comes near it).
+#       donHi stays 369.2 (high of bar 269 / 270) for the rest of the chart -> no further brkUp ; no flip.
+#   bar  (open, high, low, close)        ema21    low-ema  pbUp conditions (stDir < 0 holds throughout)
+#   270  (369.0, 369.2, 365.8, 366.0)    359.636   6.16    down bar
+#   271  (366.0, 366.2, 362.8, 363.0)    359.942   2.86    down bar
+#   272  (363.0, 363.2, 358.0, 358.5)    359.811  -1.81    touch ; down bar.  Also close < low[1], close < ema21,
+#                                                          close < open, high - ema21 >= 0: everything pbDn (L179)
+#                                                          needs EXCEPT stDir > 0 -> no short signal
+#   273  (358.5, 358.9, 358.2, 358.6)    359.701  -1.50    touch ; close 358.6 <= high[1] 363.2
+#   274  (358.6, 359.3, 358.5, 359.2)    359.655  -1.16    touch, close > high[1] 358.9, close > open, but
+#                                                          close 359.2 < ema21                      -> no
+#   275  (361.5, 361.7, 360.5, 360.9)    359.769   0.73    close > high[1] 359.3, close > ema21, touch in window,
+#                                                          but close < open                         -> no
+#   276  (360.9, 361.6, 360.8, 361.5)    359.926   0.87    close > open, > ema21, touch in window, but
+#                                                          close 361.5 <= high[1] 361.7             -> no
+#   277  (361.5, 361.7, 360.9, 361.1)    360.033   0.87    down bar
+#   278  (361.1, 364.7, 361.1, 364.5)    360.439   0.66    close > high[1] 361.7, > ema21, > open ; the window of
+#                                                          ta.lowest(low - ema21, 5) is bars 274 .. 278 and bar
+#                                                          274 is its only touch                    -> pbUp
+#   then two flat bars at 364.5 (close > open fails).
+# Variant "late": one more down bar (361.1, 361.3, 360.8, 360.9; ema21 360.112) is inserted before the resume
+#   bar, which becomes bar 279 (ema21 360.510 < low 360.9): the last touch (bar 274) is now 5 bars back, outside
+#   the window 275 .. 279 -> touchUp false -> no signal at all.
+def pullback_chart(late=False):
     rows = []
     for i in range(270):
         c = 100.0 + i
         rows.append((c - 1, c + 0.2, c - 1.2, c))
-    rows += [(369.0, 369.2, 365.8, 366.0), (366.0, 366.2, 362.8, 363.0), (363.0, 363.2, 359.0, 360.5),
-             (360.5, 364.7, 360.3, 364.5)]
-    rows += [(364.5, 364.7, 364.3, 364.5)] * 3
+    rows += [(369.0, 369.2, 365.8, 366.0), (366.0, 366.2, 362.8, 363.0), (363.0, 363.2, 358.0, 358.5),
+             (358.5, 358.9, 358.2, 358.6), (358.6, 359.3, 358.5, 359.2), (361.5, 361.7, 360.5, 360.9),
+             (360.9, 361.6, 360.8, 361.5), (361.5, 361.7, 360.9, 361.1)]
+    if late:
+        rows += [(361.1, 361.3, 360.8, 360.9), (360.9, 364.7, 360.9, 364.5)]
+    else:
+        rows += [(361.1, 364.7, 361.1, 364.5)]
+    rows += [(364.5, 364.7, 364.3, 364.5)] * 2
     return chart_of(rows, 3600)
 
 
@@ -1123,18 +1226,21 @@ def pullback_trigger_only(E):
     chart = pullback_chart()
     for kw in (dict(), dict(useBrk=False, useFlip=False), dict(useBrk=False), dict(useFlip=False)):
         res, s = run_series(E, chart, mkt, stFactor=10.0, **LOOSE, **kw)
-        assert np.flatnonzero(s["longSig"]).tolist() == [273], (kw, np.flatnonzero(s["longSig"]).tolist())
-        assert not s["shortSig"].any(), kw
-        assert res["trades"] == [] and res["open_trade"]["entry_bar"] == 273 and res["open_trade"]["trig"] == "PB"
+        assert np.flatnonzero(s["longSig"]).tolist() == [278], (kw, np.flatnonzero(s["longSig"]).tolist())
+        assert not s["shortSig"].any(), (kw, np.flatnonzero(s["shortSig"]).tolist())
+        assert res["trades"] == [] and res["open_trade"]["entry_bar"] == 278 and res["open_trade"]["trig"] == "PB"
     res, s = run_series(E, chart, mkt, stFactor=10.0, **LOOSE, usePb=False)
     assert not s["longSig"].any() and not s["shortSig"].any() and res["open_trade"] is None
-    # the mirrored chart (prices reflected around 500) fires the short pullback: pbDn, name "PB", nothing else
-    mirror = {"t": chart["t"], "o": 500.0 - chart["o"], "h": 500.0 - chart["l"], "l": 500.0 - chart["h"],
-              "c": 500.0 - chart["c"], "v": chart["v"]}
-    res, s = run_series(E, mirror, mkt, stFactor=10.0, **LOOSE)
-    assert np.flatnonzero(s["shortSig"]).tolist() == [273] and not s["longSig"].any()
+    # touch 5 bars back: outside ta.lowest(low - ema21, 5)
+    res, s = run_series(E, pullback_chart(late=True), mkt, stFactor=10.0, **LOOSE)
+    assert not s["longSig"].any() and not s["shortSig"].any() and res["open_trade"] is None
+    # the mirrored chart (prices reflected around 500) fires the short pullback pbDn (L179) and nothing else
+    res, s = run_series(E, mirrored(chart), mkt, stFactor=10.0, **LOOSE)
+    assert np.flatnonzero(s["shortSig"]).tolist() == [278] and not s["longSig"].any()
     assert res["open_trade"]["dir"] == -1 and res["open_trade"]["trig"] == "PB"
-    res, s = run_series(E, mirror, mkt, stFactor=10.0, **LOOSE, dirMode="Long only")
+    res, s = run_series(E, mirrored(pullback_chart(late=True)), mkt, stFactor=10.0, **LOOSE)
+    assert not s["longSig"].any() and not s["shortSig"].any() and res["open_trade"] is None
+    res, s = run_series(E, mirrored(chart), mkt, stFactor=10.0, **LOOSE, dirMode="Long only")
     assert not s["shortSig"].any() and res["open_trade"] is None
 
 
@@ -1184,6 +1290,20 @@ def sawtooth_signals_and_first_trades(E):
     # BOTH sides (L160-L161) -> scoreL - scoreS == 5 exactly.
     assert s["htfTrend"][250] == 1.0
     assert int(s["scoreL"][250]) - int(s["scoreS"][250]) == 5 and int(s["scoreL"][250]) >= 6
+    # Steady-state ADX of this pattern (every rma(14) of a 2-periodic input x_e, x_o settles at
+    # r_e = (13*x_o + 14*x_e)/27, r_o = (13*x_e + 14*x_o)/27):
+    #   plusDM 1.3 / 0, minusDM 0 / 0.3 (even / odd) -> dx_even = 14.3/22.1 = 0.6471, dx_odd = 12.7/21.1 = 0.6019
+    #   adx_even = 62.53 > adx_odd = 62.36 -> "adx > adx[3]" (L161) is true on even bars, false on odd bars
+    # -> scoreL = 7, scoreS = 2 on even bars ; scoreL = 6, scoreS = 1 on odd bars.
+    assert int(s["scoreL"][250]) == 7 and int(s["scoreS"][250]) == 2
+    assert int(s["scoreL"][251]) == 6 and int(s["scoreS"][251]) == 1
+    # so the script's DEFAULT inputs fire as well: scoreL >= minScore holds with equality (7 >= 7, L202) and
+    # tsm = 1 (close above its value 20 / 50 / 100 / 200 bars ago) ; no flip / pullback trigger exists here.
+    res_d, s_d = run_series(E, sawtooth_chart(320, 3600), mkt)
+    assert np.flatnonzero(s_d["longSig"]).tolist() == list(range(250, 320, 2)) and not s_d["shortSig"].any()
+    assert [t["entry_bar"] for t in res_d["trades"]] == [250, 276] and res_d["open_trade"]["entry_bar"] == 302
+    _, s_6 = run_series(E, sawtooth_chart(320, 3600), mkt, minScore=6, useBrk=True, useFlip=False, usePb=False)
+    assert np.flatnonzero(s_6["longSig"]).tolist() == list(range(250, 320, 2))      # odd bars have no trigger
     # shifted by one bar the same pattern breaks out on odd bars: first signal on 251, not 250
     res1, s1 = run_series(E, sawtooth_chart(320, 3600, phase=1), mkt, **only_brk)
     assert np.flatnonzero(s1["longSig"]).tolist() == list(range(251, 320, 2))
@@ -1221,6 +1341,32 @@ def sawtooth_signals_and_first_trades(E):
     assert abs(st["gross"] - st["net"]) < 1e-12 and st["loss"] == 0.0 and st["maxDd"] == 0.0
     assert abs(st["peak"] - st["net"]) < 1e-12 and abs(st["netL"] - st["net"]) < 1e-12 and st["netS"] == 0.0
 
+    # Mirrored chart (prices 500 - p): the same path as shorts.  Entry 500 - 125.6 = 374.4 ; slDistS (L192) is
+    # the mirror of slDistL ; chandS the mirror of chandL ; tp3 = 374.4 - 4*risk = 361.5 > mintick.
+    # Only the cost differs: cR = 0.03/100 * 374.4 / risk (cost is proportional to the entry price).
+    res, s = run_series(E, mirrored(sawtooth_chart(320, 3600)), mkt, **only_brk)
+    assert np.flatnonzero(s["shortSig"]).tolist() == list(range(250, 320, 2)) and not s["longSig"].any()
+    assert s["htfTrend"][250] == -1.0 and int(s["scoreS"][250]) - int(s["scoreL"][250]) == 5
+    tr = res["trades"]
+    assert len(tr) == 2, tr
+    for k, t in enumerate(tr):
+        e_bar = 250 + 26 * k
+        entry = 500.0 - (e_bar / 2 + 0.6)
+        want = trade(-1, e_bar, e_bar + 26, entry, RISK, HP, entry - 4 * RISK, "TP3", 1.525,
+                     cost=0.03 / 100 * entry / RISK, hits=(True, True, True), score=int(s["scoreS"][e_bar]))
+        for key in TRADE_KEYS:
+            g, w = t[key], want[key]
+            if isinstance(w, float):
+                assert abs(g - w) <= 1e-6 * max(1.0, abs(w)), (k, key, g, w)
+            else:
+                assert g == w, (k, key, g, w)
+    ot = res["open_trade"]
+    assert ot["entry_bar"] == 302 and ot["dir"] == -1 and abs(ot["entry"] - 348.4) < 1e-9
+    st = res["stats"]
+    assert (st["n"], st["tp3"], st["win"], st["nL"], st["nS"]) == (2, 2, 2, 0, 2)
+    cost_sum = 0.03 / 100 * (374.4 + 361.4) / RISK
+    assert abs(st["netS"] - (3.05 - cost_sum)) < 1e-6 and st["netL"] == 0.0 and abs(st["costR"] - cost_sum) < 1e-6
+
 
 @check("run")
 def small_frame_guard(E):
@@ -1241,6 +1387,14 @@ def small_frame_guard(E):
     assert sig(m15, costMode="Custom", costCustom=0.2, smallGuard=False) == evens
     assert sig(m60, costMode="Custom", costCustom=0.2) == evens
     assert sig(m15, costMode="Custom", costCustom=0.2, cgMaxPct=8.0) == [250, 252, 254]
+    # short side (cgOkS, L200) on the mirrored chart: close = 374.4 on bar 250
+    #   Auto 0.03%: 0.0003 * 374.4 / 0.07 = 1.60 <= 3.2148 -> signals ; Custom 0.2%: 10.7 > 3.2148 -> blocked
+    mir = mirrored(chart)
+    sig_s = lambda mkt, **kw: np.flatnonzero(run_series(E, mir, mkt, **only_brk, **kw)[1]["shortSig"]).tolist()  # noqa: E731
+    assert sig_s(m15) == evens
+    assert sig_s(m15, costMode="Custom", costCustom=0.2) == []
+    assert sig_s(m15, costMode="Custom", costCustom=0.2, smallGuard=False) == evens
+    assert sig_s(m60, costMode="Custom", costCustom=0.2) == evens
     # the cost itself is still charged when the guard is off: cR = 0.2/100 * 125.6 / risk
     res, _ = run_series(E, chart, m15, **only_brk, costMode="Custom", costCustom=0.2, smallGuard=False)
     assert abs(res["trades"][0]["cost_R"] - 0.002 * 125.6 / RISK) < 1e-6
@@ -1278,7 +1432,28 @@ def htf_alignment_and_ema_length(E):
     t50 = _htf_trend_per_bar(E, htf, 50)
     assert t21[:20].tolist() == [0.0] * 20 and t21[20:40].tolist() == [1.0] * 20, t21.tolist()
     assert t21[45:].tolist() == [-1.0] * 15, t21.tolist()
+    # the turn, bar by bar (EMA21: 129.636, 129.942, 129.947, 129.679 ; lower band stays 132.51):
+    #   40: close 136 above band and EMA -> +1 ; 41: close 133 -> +1 ; 42: close 130 < band -> SuperTrend down, but
+    #   close 130 > EMA 129.947 -> neither condition of L126 -> 0 ; 43: close 127 < EMA and down -> -1
+    assert t21[40:45].tolist() == [1.0, 1.0, 0.0, -1.0, -1.0], t21[40:45].tolist()
     assert t50[:49].tolist() == [0.0] * 49 and t50[49:].tolist() == [-1.0] * 11, t50.tolist()
+
+    # A second series for the remaining branch of L126: 40 rising bars, then a slow fade of 0.2 per bar
+    # (open = previous close, high = open + 0.5, low = close - 0.5 -> tr 1.2).
+    #   c - ema21 = L follows L_n = (10/11) * (L_{n-1} - 0.2), L_0 = 10 (bar 39) -> L_n = -2 + 12 * (10/11)^n:
+    #   +0.158 on bar 57 (n = 18), -0.038 on bar 58 (n = 19).  The lower band (132.51 on bar 39, at most 133.17
+    #   afterwards) stays below every close (>= 134.0) -> SuperTrend remains up.
+    #   -> +1 on bars 20 .. 57 ; from bar 58 on close < ema but direction < 0 -> 0, not -1.
+    fade_c = [100.0 + d for d in range(40)] + [139.0 - 0.2 * (d - 39) for d in range(40, 65)]
+    fr = []
+    for d, c in enumerate(fade_c):
+        o = fade_c[d - 1] if d else c
+        fr.append((o, max(o, c) + 0.5, min(o, c) - 0.5, c))
+    fa = np.array(fr)
+    fade = {"t": np.arange(65, dtype=np.int64) * D, "o": fa[:, 0].copy(), "h": fa[:, 1].copy(),
+            "l": fa[:, 2].copy(), "c": fa[:, 3].copy(), "v": np.zeros(65)}
+    tf21 = _htf_trend_per_bar(E, fade, 21)
+    assert tf21.tolist() == [0.0] * 20 + [1.0] * 38 + [0.0] * 7, tf21.tolist()
 
     def series(tf, htf_s):
         res = E.run(chart, htf, E.Params(), mk_market(tf=tf, htf=htf_s))

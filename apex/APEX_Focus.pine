@@ -15,7 +15,10 @@
 //    internal simulation on the chart's own history, so every number can be checked on the chart;
 //  * alerts: the event carries its side, the targets filled on the bar and the real fill price, a stop at
 //    the initial stop is always a STOP, and the exit of the old trade is sent before the new entry;
-//  * trendlines are anchored by time; a short target that would be at or below zero is left empty.
+//  * trendlines are anchored by time; a short target that would be at or below zero is left empty, and so
+//    is TP3 when the TP1 and TP2 close percentages total 100% (no runner remains after TP2);
+//  * Auto cost and Auto profile treat syminfo.type "spot" and "swap" as crypto; the higher-cost metal match
+//    is case-insensitive and includes PLATINUM / COPPER.
 //
 // Non-repainting: signals are evaluated on confirmed bars only and higher-timeframe data uses the
 // previous completed higher-timeframe bar (expression[1] + lookahead_on). Pivots are confirmed pivLen
