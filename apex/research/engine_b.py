@@ -569,8 +569,10 @@ def htf_trend(chart: dict, htf: dict, market) -> np.ndarray:
     """request.security(tickerid, htf, htfTrendCalc(len)[1], lookahead_on) on every chart bar (nan = na)."""
     tf_s = int(market.tf_seconds)
     htf_s = int(market.htf_seconds)
-    if htf_s <= tf_s or htf is None:          # script never requests a lower timeframe: chart tf itself
+    if htf_s <= tf_s:                         # script never requests a lower timeframe: chart tf itself
         bars, htf_s = chart, tf_s
+    elif htf is None:
+        raise ValueError("htf bars are required when the higher timeframe is longer than the chart timeframe")
     else:
         bars = htf
     ema_len = 21 if htf_s >= 86400 else 50
@@ -988,6 +990,43 @@ def run_fast(chart: dict, feats: dict, mgmt: dict, costPct: float | None = None)
                            feats["trigCodeL"], feats["trigCodeS"], feats["scoreL"], feats["scoreS"])
 
 
+def check_invariants(res: dict, chart: dict, tol: float = 1e-9) -> None:
+    """Assert the bookkeeping invariants that follow from the Pine source (raises AssertionError).
+
+    Stop invariant for reason "SL" (activeStopReason: stop still at sl0 AND full position, so nothing was
+    realized before): R == (exit_px - entry) * dir / risk - cost_R, where exit_px == sl0 (R = -1 - cost_R up to
+    rounding) when the exit bar opened inside the stop, and exit_px == open (R <= -1 - cost_R) when the bar
+    opened at/beyond sl0 (long: open <= sl0, short: open >= sl0)."""
+    o, c = chart["o"], chart["c"]
+    tr, st = res["trades"], res["stats"]
+    assert st["n"] == len(tr) and st["nL"] + st["nS"] == st["n"]
+    net = peak = dd = 0.0
+    for i, t in enumerate(tr):
+        d = t["dir"]
+        net += t["R"]
+        peak = max(peak, net)
+        dd = max(dd, peak - net)
+        assert t["exit_bar"] > t["entry_bar"] and t["entry"] == c[t["entry_bar"]], (i, t)
+        assert (not t["hit2"] or t["hit1"]) and (not t["hit3"] or t["hit2"]), (i, t)
+        assert t["R"] == t["gross_R"] - t["cost_R"], (i, t)
+        assert (t["reason"] == "TP3") == t["hit3"], (i, t)
+        if t["reason"] == "SL":
+            ob = o[t["exit_bar"]]
+            gapped = (ob <= t["sl0"]) if d == 1 else (ob >= t["sl0"])
+            assert t["exit_px"] == (ob if gapped else t["sl0"]), (i, t)
+            assert abs(t["gross_R"] - (t["exit_px"] - t["entry"]) * d / t["risk"]) <= tol, (i, t)
+            assert (t["gross_R"] <= -1 + tol) if gapped else (abs(t["gross_R"] + 1) <= tol), (i, t)
+        elif t["reason"] == "Reverse":
+            nxt = tr[i + 1] if i + 1 < len(tr) else res["open_trade"]
+            assert t["exit_px"] == c[t["exit_bar"]] and nxt is not None, (i, t)
+            assert nxt["entry_bar"] == t["exit_bar"] and nxt["dir"] == -d, (i, t)
+    assert abs(net - st["net"]) <= tol and abs(peak - st["peak"]) <= tol and abs(dd - st["maxDd"]) <= tol
+    assert abs(st["gross"] - st["loss"] - st["net"]) <= tol and abs(st["netL"] + st["netS"] - st["net"]) <= tol
+    assert st["tp1"] == sum(t["hit1"] for t in tr) and st["tp2"] == sum(t["hit2"] for t in tr)
+    assert st["tp3"] == sum(t["hit3"] for t in tr) and st["fullSl"] == sum(t["reason"] == "SL" for t in tr)
+    assert st["win"] == sum(t["R"] > 0 for t in tr) and st["nL"] == sum(t["dir"] == 1 for t in tr)
+
+
 if __name__ == "__main__":
     import sys
     import time
@@ -1002,6 +1041,7 @@ if __name__ == "__main__":
         t0 = time.perf_counter()
         res_ = run(chart_, htf_, Params(), market_)
         dt_ = time.perf_counter() - t0
+        check_invariants(res_, chart_)
         print(f"{name}: bars={len(chart_['c'])} htf={src_} trades={len(res_['trades'])} "
               f"open={res_['open_trade'] is not None} time={dt_ * 1e3:.2f} ms")
         print("  ", res_["stats"])
