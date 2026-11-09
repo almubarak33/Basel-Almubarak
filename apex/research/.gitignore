@@ -1,0 +1,4 @@
+# Market data is fetched per session (TradingView / Binance public API); it is not redistributed in the repo.
+data/
+__pycache__/
+*.pyc
