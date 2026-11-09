@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Deep crypto history from Binance's public market-data mirror (no key needed).
 
-Usage: python3 fetch_binance.py            # default universe below
+Usage: python3 fetch_binance.py [--force]   # default universe below; existing files are skipped unless --force
 Writes data/BINANCEX_<SYMBOL>_<interval>.csv (t = bar open, unix seconds UTC). Only closed bars are kept.
+Files are written atomically (temp file + rename) so readers never see a partial series.
 """
 import json
 import os
@@ -56,16 +57,21 @@ def fetch(symbol, itv, max_bars):
         time.sleep(0.15)
     ts = sorted(rows)[-max_bars:]
     path = os.path.join(OUT, f"BINANCEX_{symbol}_{itv}.csv")
-    with open(path, "w") as fh:
+    tmp = path + ".part"
+    with open(tmp, "w") as fh:
         fh.write("t,o,h,l,c,v\n")
         for t in ts:
             o, h, l, c, v = rows[t]
             fh.write(f"{t},{float(o)},{float(h)},{float(l)},{float(c)},{float(v)}\n")
+    os.replace(tmp, path)
     print(f"{os.path.basename(path):36s} {len(ts):6d}  {time.strftime('%Y-%m-%d', time.gmtime(ts[0]))} -> {time.strftime('%Y-%m-%d', time.gmtime(ts[-1]))}", flush=True)
 
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
+    force = "--force" in sys.argv
     for sym, spec in UNIVERSE.items():
         for itv, n in spec.items():
+            if not force and os.path.exists(os.path.join(OUT, f"BINANCEX_{sym}_{itv}.csv")):
+                continue
             fetch(sym, itv, n)
