@@ -1,0 +1,14 @@
+====================================================================================================
+datasets: 135  (23 with the full matrix of 88 Params, 112 with 7 core Params)   [full length, no slicing]
+bars compared: 23,153,361   closed trades compared: 289,325
+dataset x Params cases: 2808   mismatching: 0   bit-identical: 2808   max relative float difference: 0
+input-check (ValueError) cases: 11   mismatching: 0   Params dataclass: identical
+edge run() cases (short charts, L120 fallback, partial HTF): 126   mismatching: 0   bit-identical: 126   closed trades compared: 4,102
+synthetic-chart run() cases: 800   mismatching: 0   bit-identical: 800   closed trades compared: 8,571
+simulate() fuzz scenarios: 6000   mismatching: 0   closed trades compared: 171,594   flavours: lists=410  na-dist=363  na-price=363  negative=360  plain=4136  zero-dist=368
+branch coverage, real data : hits:000=107355  hits:100=121999  hits:110=43163  hits:111=16808  nan R=35  open at end=858  re-entry on exit bar=36715  reason:BE/Trail=153628  reason:Remaining SL=3060  reason:Reverse=33432  reason:SL=77904  reason:TP=4493  reason:TP3=16808  stop filled at open (gap)=24982  tp3 na=4564  trades=289325
+branch coverage, synth+edge: hits:000=3562  hits:100=5495  hits:110=2167  hits:111=1449  nan R=7  open at end=445  re-entry on exit bar=2282  reason:BE/Trail=6943  reason:Remaining SL=53  reason:Reverse=1225  reason:SL=2605  reason:TP=398  reason:TP3=1449  stop filled at open (gap)=1985  tp3 na=749  trades=12673
+branch coverage, fuzz      : SL with hit1 (w1=0)=243  hits:000=117557  hits:100=24474  hits:110=23034  hits:111=6529  nan R=6348  open at end=3564  re-entry on exit bar=58530  reason:BE/Trail=13615  reason:Remaining SL=1001  reason:Reverse=66342  reason:SL=68921  reason:TP=15186  reason:TP3=6529  stop filled at open (gap)=20692  tp3 na=37721  trades=171594
+engine time (summed over workers): A 766.1 s   B 7.49 s   (B is 102x faster)   wall 207.1 s
+RESULT: PASS - zero mismatches
+exit 0

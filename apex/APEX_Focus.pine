@@ -441,13 +441,15 @@ if not na(cur)
     evDir := cur.dir
 // Intrabar prices of the chart bar. The arrays are empty (or na) when the chart timeframe is too small for
 // the requested intrabar timeframe or the bar is older than the intrabar history TradingView provides.
-string ibTf = timeframe.in_seconds() >= 86400 ? "60" : timeframe.in_seconds() >= 14400 ? "15" : timeframe.in_seconds() >= 3600 ? "5" : "1"
+// With the replay off the request is made at the chart's own timeframe (valid and cheap) and is not used.
+string ibTf = not intrabar ? timeframe.period : timeframe.in_seconds() >= 86400 ? "60" : timeframe.in_seconds() >= 14400 ? "15" : timeframe.in_seconds() >= 3600 ? "5" : "1"
+bool ibFiner = intrabar and timeframe.in_seconds(ibTf) < timeframe.in_seconds()
 [ibO, ibH, ibL, ibC] = request.security_lower_tf(syminfo.tickerid, ibTf, [open, high, low, close], ignore_invalid_timeframe = true)
 var int managedBars = 0
 var int replayedBars = 0
 if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
     int d = cur.dir
-    bool useIb = intrabar and not na(ibH) and ibH.size() > 0
+    bool useIb = ibFiner and not na(ibH) and ibH.size() > 0
     int segCount = useIb ? ibH.size() : 1
     managedBars += 1
     replayedBars += useIb ? 1 : 0
@@ -633,9 +635,11 @@ var table dash = na
 if showDash and barstate.islast
     if na(dash)
         dash := table.new(dashPos, 2, 14, bgcolor = color.new(chart.bg_color, 0), frame_color = color.new(neutCol, 40), frame_width = 1, border_color = color.new(neutCol, 80), border_width = 1)
+        // Merged once: a cell that is already merged cannot be merged again.
+        table.merge_cells(dash, 0, 0, 1, 0)
+        table.merge_cells(dash, 0, 13, 1, 13)
     string profShort = profile == PROF_SHD ? "Shield" : profile == PROF_SNP ? "Sniper" : profile == PROF_HP ? "High-Prob" : profile == PROF_BAL ? "Balanced" : profile == PROF_RUN ? "Runner" : "Custom"
     table.cell(dash, 0, 0, "APEX · " + profShort + " · " + timeframe.period, text_color = chart.fg_color, text_size = size.small, text_halign = text.align_center, bgcolor = color.new(neutCol, 75))
-    table.merge_cells(dash, 0, 0, 1, 0)
     color netCol = st.net > 0 ? bullCol : st.net < 0 ? bearCol : chart.fg_color
     string pfTxt = st.loss > 0 ? str.tostring(st.gross / st.loss, "#.##") : "—"
     color pfCol = st.loss > 0 ? (st.gross >= st.loss ? bullCol : bearCol) : chart.fg_color
@@ -659,7 +663,6 @@ if showDash and barstate.islast
     dashRow(dash, 12, tr("Bars replayed intrabar", "شموع أُعيد تمثيلها من الداخل"), pctOf(replayedBars, managedBars), chart.fg_color)
     string note = timeframe.in_seconds() < 14400 ? tr("Backtests found no edge below 4H", "الاختبارات لم تجد أفضلية تحت فريم 4 ساعات") : st.n < 30 ? tr("Small sample: fewer than 30 trades", "عيّنة صغيرة: أقل من 30 صفقة") : tr("Past simulation on this chart, not a forecast", "محاكاة لماضي هذا الشارت وليست توقعًا")
     table.cell(dash, 0, 13, note, text_color = color.new(chart.fg_color, 30), text_size = size.tiny, text_halign = text.align_center)
-    table.merge_cells(dash, 0, 13, 1, 13)
 
 // ───────────────────────────── Plots ─────────────────────────────
 color emaCol = ema21 >= ema55 ? bullCol : bearCol
