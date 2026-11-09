@@ -10,11 +10,13 @@ E = rl.E
 CELLS = ("TRAIN", "TEST_TIME", "TEST_INSTR")
 
 
-def run(uni, dir_mode="Auto", profile="AUTO", mgmt=None, cost_fn=None, **pkw):
+def run(uni, dir_mode="Auto", profile="AUTO", mgmt=None, cost_fn=None, close_stop=None, **pkw):
+    """close_stop: simulation rule; default = v1 rule (0) for Direction "Both" rows, v2 rule (1) otherwise."""
+    rule = (0 if dir_mode == "Both" else 1) if close_stop is None else close_stop
     return rl.run_universe(
         uni,
         params_fn=lambda s: v2.params(s.market, dir_mode, **pkw),
-        mgmt_fn=(lambda s: mgmt) if mgmt else (lambda s: v2.mgmt(s.market, profile)),
+        mgmt_fn=(lambda s: {**mgmt, "closeStop": rule}) if mgmt else (lambda s: v2.mgmt(s.market, profile, rule)),
         cost_fn=cost_fn)
 
 
@@ -57,22 +59,21 @@ def main():
     print("\n[C] v2 Direction Auto: management profiles on 1D and 4H (non-crypto and crypto pooled)")
     for tf in ("1D", "4h"):
         sub = [s for s in uni if s.tf == tf]
-        for prof in ("SNP", "HP", "BAL", "RUN"):
+        for prof in ("SHD", "SNP", "HP", "BAL", "RUN"):
             print(cells_row(f"{tf} {prof}", run(sub, profile=prof)))
 
     print("\n[D] the price of a high win rate: first target k1 (R), share closed w1; 1D, Direction Auto, BE + trail")
     sub = [s for s in uni if s.tf == "1D"]
-    for k1, w1 in ((0.05, 1.0), (0.08, 1.0), (0.10, 1.0), (0.15, 1.0), (0.20, 1.0), (0.30, 1.0),
-                   (0.15, 0.5), (0.30, 0.5), (0.50, 0.5), (1.00, 0.5)):
-        m = {"k1": k1, "k2": max(1.5, 2 * k1), "k3": max(4.0, 4 * k1), "w1": w1, "w2": 0.25 if w1 < 1 else 0.0,
+    for k1, w1 in ((0.05, 1.0), (0.05, 0.75), (0.05, 0.5), (0.10, 0.5), (0.15, 0.5), (0.30, 0.5), (0.50, 0.5), (1.00, 0.5)):
+        m = {"k1": k1, "k2": max(1.5, 2 * k1), "k3": max(4.0, 4 * k1), "w1": w1, "w2": min(0.25, 1 - w1),
              "trailOn": True, "trailFrom": 1, "beOn": True}
         print(cells_row(f"k1={k1:4.2f} close {int(100*w1):3d}%", run(sub, mgmt=m)))
     print(cells_row("Trend Runner (1R/2R/8R)", run(sub, profile="RUN")))
 
     print("\n[E] same frontier on 4H")
     sub = [s for s in uni if s.tf == "4h"]
-    for k1, w1 in ((0.05, 1.0), (0.10, 1.0), (0.15, 0.5), (0.30, 0.5), (1.00, 0.5)):
-        m = {"k1": k1, "k2": max(1.5, 2 * k1), "k3": max(4.0, 4 * k1), "w1": w1, "w2": 0.25 if w1 < 1 else 0.0,
+    for k1, w1 in ((0.05, 1.0), (0.05, 0.5), (0.15, 0.5), (0.30, 0.5), (1.00, 0.5)):
+        m = {"k1": k1, "k2": max(1.5, 2 * k1), "k3": max(4.0, 4 * k1), "w1": w1, "w2": min(0.25, 1 - w1),
              "trailOn": True, "trailFrom": 1, "beOn": True}
         print(cells_row(f"k1={k1:4.2f} close {int(100*w1):3d}%", run(sub, mgmt=m)))
     print(cells_row("Trend Runner (1R/2R/8R)", run(sub, profile="RUN")))
@@ -85,7 +86,7 @@ def main():
     gold = [s for s in rl.universe(roles=("primary", "replica")) if s.underlying == "GOLD"]
     for s in sorted(gold, key=lambda s: (rl.TF_ORDER.index(s.tf), s.name)):
         print(all_row(f"{s.name} v1 default", run([s], dir_mode="Both")))
-        for prof in ("SNP", "HP", "RUN"):
+        for prof in ("SHD", "SNP", "HP", "RUN"):
             print(all_row(f"{s.name} v2 {prof}", run([s], profile=prof)))
 
     print("\n[H] 5-minute charts: guard and cost sensitivity (v2 Direction Auto, profile Auto)")

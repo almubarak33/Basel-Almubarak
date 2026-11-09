@@ -428,6 +428,8 @@ def compute_series(chart: dict, htf: dict, params: Params, market) -> dict:
     htf_seconds = int(market.htf_seconds)
     if htf_seconds <= tf_seconds:
         htf_bars, htf_effective_seconds = chart, tf_seconds
+    elif htf is None:
+        raise ValueError("htf bars are required when the higher timeframe is longer than the chart timeframe")
     else:
         htf_bars, htf_effective_seconds = htf, htf_seconds
     htfUse21 = htf_effective_seconds >= 86400                                   # L134 (Auto branch)

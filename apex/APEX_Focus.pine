@@ -3,22 +3,26 @@
 // full trade plan (entry / stop / 3 targets / trailing), trend channel, pivot trendlines,
 // support/resistance zones, a statistics panel and alerts.
 //
-// What changed against v1 (see apex/REPORT.md in the repository for the measurements behind each item):
+// What changed against v1 (measurements behind each item: apex/REPORT.md in the repository):
 //  * compiler warnings removed: one titled input per inline row (CW10026), no history-dependent call
 //    inside a ternary (CW10003), dead series deleted;
 //  * "Direction: Auto" (default): long only, except forex where both sides trade. In the backtests the
 //    short side lost money in every asset class except forex and crypto, where it was flat;
-//  * new "Sniper" management profile (first target 0.15R) for a higher hit rate;
+//  * two new management profiles: "Shield" (first target 0.05R, built for daily charts) and "Sniper" (0.15R);
+//  * the internal simulation replays every managed bar on intrabar data where TradingView has it, and
+//    fills a stop that a fill on the same bar has just raised when that bar closes through it;
 //  * statistics panel (win rate, target hit rates, profit factor, net R, drawdown) computed by the
 //    internal simulation on the chart's own history, so every number can be checked on the chart;
-//  * alert payload carries the real fill price of the event; trendlines are anchored by time.
+//  * alerts: the event carries its side, the targets filled on the bar and the real fill price, a stop at
+//    the initial stop is always a STOP, and the exit of the old trade is sent before the new entry;
+//  * trendlines are anchored by time; a short target that would be at or below zero is left empty.
 //
 // Non-repainting: signals are evaluated on confirmed bars only and higher-timeframe data uses the
 // previous completed higher-timeframe bar (expression[1] + lookahead_on). Pivots are confirmed pivLen
 // bars later and drawn back at the pivot bar; the rolling channel is recalculated on the last bar.
 // Entries are simulated at the confirmed bar close. Price/target accounting is an OHLC simulation,
-// not observed broker execution. A high win rate is not the same as profitability: read it together
-// with the profit factor and the net R.
+// not observed broker execution, and the statistics describe only the bars loaded on the chart.
+// A high win rate is not the same as profitability: read it together with the profit factor and net R.
 //@version=6
 indicator("APEX Focus", shorttitle = "APEX FOCUS", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 250, max_bars_back = 1000)
 
@@ -31,6 +35,7 @@ const string G_DASH = "⑤ Statistics & cost"
 const string G_SIZE = "⑥ Position sizing"
 
 const string PROF_AUTO = "Auto (crypto → Trend Runner, others → High-Probability)"
+const string PROF_SHD = "Shield (0.05R/1.5R/4R + breakeven, daily charts)"
 const string PROF_SNP = "Sniper (0.15R/1.5R/4R + trail)"
 const string PROF_HP  = "High-Probability (0.3R/1.5R/4R + trail)"
 const string PROF_BAL = "Balanced (1R/2R/3R)"
@@ -50,11 +55,11 @@ usePb       = input.bool(true,  "Trigger: trend pullback resume", group = G_SIG)
 minScore    = input.int(7, "Minimum confluence score (0-7)", minval = 0, maxval = 7, group = G_SIG, tooltip = "7/7 counts aligned conditions (HTF trend, EMA200 side, EMA21/55 order, ADX threshold, ADX rising, DI alignment, RSI side); it is not a calibrated win probability. In the backtests the score state itself carried the edge on 4H/1D long trades; the trigger added almost nothing.")
 adxMin      = input.float(25.0, "ADX trend threshold", minval = 5, step = 1, group = G_SIG)
 useTsm      = input.bool(true, "Momentum ensemble must agree (TSMOM 20/50/100/200)", group = G_SIG, tooltip = "Price must be above (long) / below (short) its close 20, 50, 100 and 200 bars ago.")
-dirMode     = input.string(DIR_AUTO, "Direction", options = [DIR_AUTO, "Both", "Long only", "Short only"], group = G_SIG, tooltip = "Auto: long only, except forex symbols where both sides trade. Backtest (104 series, 5m-1D): short trades lost money on metals, energy, indices and stocks and were flat on forex and crypto, on tuning data and on unseen data alike.")
+dirMode     = input.string(DIR_AUTO, "Direction", options = [DIR_AUTO, "Both", "Long only", "Short only"], group = G_SIG, tooltip = "Auto: long only, except forex symbols where both sides trade. In the backtests (about 100 series, 5m to 1D) short trades lost money on metals, energy, indices and stocks and were flat on forex and crypto, on the tuning data and on unseen data alike.")
 htfMode     = input.string("Auto", "Higher timeframe · custom", options = ["Auto", "Custom"], group = G_SIG, inline = "htf", tooltip = "Auto: ≤5m→1H, ≤1H→4H, ≤4H→1D, ≤1D→1W, above→1M. HTF trend = close versus an EMA plus SuperTrend(3,10) on the previous completed higher-timeframe bar. EMA length: Auto uses 50 for an intraday HTF and 21 for 1D and above; Custom uses 50 below 1W and 21 from 1W. A Custom timeframe lower than the chart is replaced by the chart timeframe.")
 htfCustom   = input.timeframe("240", "", group = G_SIG, inline = "htf")
 
-profileIn   = input.string(PROF_AUTO, "Trade-management profile", options = [PROF_AUTO, PROF_SNP, PROF_HP, PROF_BAL, PROF_RUN, PROF_CUS], group = G_RISK, tooltip = "Sniper: 0.15R / 1.5R / 4R, breakeven and trailing after TP1 (highest hit rate, smallest average win). High-Probability: 0.3R / 1.5R / 4R with trailing after TP1. Balanced: 1R / 2R / 3R. Trend Runner: 1R / 2R / 8R with trailing after TP2 (lowest hit rate, largest average result in the backtests). The smaller the first target, the higher the win rate and the lower the profit per trade: check the statistics panel.")
+profileIn   = input.string(PROF_AUTO, "Trade-management profile", options = [PROF_AUTO, PROF_SHD, PROF_SNP, PROF_HP, PROF_BAL, PROF_RUN, PROF_CUS], group = G_RISK, tooltip = "Shield: first target 0.05R, half closed there, stop to breakeven, the rest trails. Built for DAILY charts: in the backtests about 93-96% of daily trades ended positive, but four out of five of them were near-breakeven scratches, the profit per trade was the smallest of all profiles, and doubling the trading cost cut the win rate to about 80%. Sniper: 0.15R / 1.5R / 4R (about 89% on daily). High-Probability: 0.3R / 1.5R / 4R (about 80%). Balanced: 1R / 2R / 3R (about 60%). Trend Runner: 1R / 2R / 8R, no breakeven, trailing after TP2 (about 45%, and the largest profit per trade). A smaller first target raises the win rate and lowers the profit per trade. Below 4H no profile showed an edge.")
 swingLook   = input.int(10, "Stop: swing lookback · buffer×ATR", minval = 2, group = G_RISK, inline = "sl")
 slBuf       = input.float(0.25, "", minval = 0, step = 0.05, group = G_RISK, inline = "sl")
 slMinAtr    = input.float(0.8, "Stop distance: min×ATR · max×ATR", minval = 0.1, step = 0.1, group = G_RISK, inline = "sl2")
@@ -67,6 +72,7 @@ cTp3        = input.float(3.0, "Custom TP3 (R)", minval = 0.1, step = 0.1, group
 cTrail      = input.bool(false, "Custom: chandelier trail after TP1", group = G_RISK)
 cBe         = input.bool(true, "Custom: move stop to breakeven after TP1", group = G_RISK)
 closeStop   = input.bool(true, "Fill a stop raised on the same bar when that bar closes through it", group = G_RISK, tooltip = "When a bar reaches TP1 (or TP2) and then closes at or beyond the stop that this fill has just moved to breakeven (or to TP1), price must have crossed that stop after the fill, so the remainder exits at the stop on this bar. Off = v1 behaviour: the remainder is carried to the next bar's open.")
+intrabar    = input.bool(true, "Replay stops and targets on intrabar data", group = G_RISK, tooltip = "A chart bar cannot tell whether its low came before or after its high. With a small first target and a breakeven stop that order decides most trades. When on, each managed bar is replayed on lower-timeframe bars (1D and above: 60 minutes, 4H: 15 minutes, 1H: 5 minutes, below: 1 minute) wherever TradingView provides them; older bars fall back to the chart bar. The panel shows how much of the simulation was replayed.")
 chLen       = input.int(22, "Chandelier: length · ×ATR", minval = 2, group = G_RISK, inline = "ch")
 chMult      = input.float(3.0, "", minval = 0.5, step = 0.1, group = G_RISK, inline = "ch")
 smallGuard  = input.bool(true, "Small-frame cost guard (below 1H) · max cost % of risk", group = G_RISK, inline = "cg", tooltip = "Skips signals whose stop is so tight that the estimated round-trip cost exceeds this share of the risk. On 5-minute forex and index charts this blocks almost every signal with the Auto cost: the panel counts the blocked signals. Set your broker's real cost in group ⑤ before loosening the guard.")
@@ -233,15 +239,15 @@ float chandS  = ta.lowest(low, chLen) + chMult * atr
 
 // Management profile
 string profile = profileIn == PROF_AUTO ? (syminfo.type == "crypto" ? PROF_RUN : PROF_HP) : profileIn
-float k1 = profile == PROF_SNP ? 0.15 : profile == PROF_HP ? 0.3 : profile == PROF_BAL ? 1.0 : profile == PROF_RUN ? 1.0 : cTp1
-float k2 = profile == PROF_SNP ? 1.5 : profile == PROF_HP ? 1.5 : profile == PROF_BAL ? 2.0 : profile == PROF_RUN ? 2.0 : cTp2
-float k3 = profile == PROF_SNP ? 4.0 : profile == PROF_HP ? 4.0 : profile == PROF_BAL ? 3.0 : profile == PROF_RUN ? 8.0 : cTp3
-float w1 = profile == PROF_SNP ? 0.50 : profile == PROF_HP ? 0.50 : profile == PROF_BAL ? 0.40 : profile == PROF_RUN ? 0.33 : cW1 / 100
-float w2 = profile == PROF_SNP ? 0.25 : profile == PROF_HP ? 0.25 : profile == PROF_BAL ? 0.30 : profile == PROF_RUN ? 0.33 : cW2 / 100
-bool trailOn = profile == PROF_SNP or profile == PROF_HP or profile == PROF_RUN or (profile == PROF_CUS and cTrail)
+float k1 = profile == PROF_SHD ? 0.05 : profile == PROF_SNP ? 0.15 : profile == PROF_HP ? 0.3 : profile == PROF_BAL ? 1.0 : profile == PROF_RUN ? 1.0 : cTp1
+float k2 = profile == PROF_SHD ? 1.5 : profile == PROF_SNP ? 1.5 : profile == PROF_HP ? 1.5 : profile == PROF_BAL ? 2.0 : profile == PROF_RUN ? 2.0 : cTp2
+float k3 = profile == PROF_SHD ? 4.0 : profile == PROF_SNP ? 4.0 : profile == PROF_HP ? 4.0 : profile == PROF_BAL ? 3.0 : profile == PROF_RUN ? 8.0 : cTp3
+float w1 = profile == PROF_SHD ? 0.50 : profile == PROF_SNP ? 0.50 : profile == PROF_HP ? 0.50 : profile == PROF_BAL ? 0.40 : profile == PROF_RUN ? 0.33 : cW1 / 100
+float w2 = profile == PROF_SHD ? 0.25 : profile == PROF_SNP ? 0.25 : profile == PROF_HP ? 0.25 : profile == PROF_BAL ? 0.30 : profile == PROF_RUN ? 0.33 : cW2 / 100
+bool trailOn = profile == PROF_SHD or profile == PROF_SNP or profile == PROF_HP or profile == PROF_RUN or (profile == PROF_CUS and cTrail)
 // Trend Runner keeps full risk on the runner until TP2 (no breakeven) and trails from TP2.
 int  trailFrom = profile == PROF_RUN ? 2 : 1
-bool beOn = profile == PROF_SNP or profile == PROF_HP or profile == PROF_BAL or (profile == PROF_CUS and cBe)
+bool beOn = profile == PROF_SHD or profile == PROF_SNP or profile == PROF_HP or profile == PROF_BAL or (profile == PROF_CUS and cBe)
 
 // ───────────────────────────── Trade model ─────────────────────────────
 type Trade
@@ -414,7 +420,12 @@ openTrade(int d, string trig, int score) =>
         keepMarker(entryMarkers, entryTag, signalHistory)
     t
 
-// 1) Internal confirmed-close simulation: manage only bars AFTER the entry close.
+// 1) Internal simulation: manage only bars AFTER the entry close.
+// Each managed chart bar is walked as a sequence of price segments: its intrabars when the replay is on and
+// TradingView has them, otherwise the chart bar itself. Inside one segment the order is: trail from the
+// previous completed chart bar -> stop already through at the segment open -> targets marketable at the open
+// -> stop inside the range (stop first) -> targets inside the range -> a stop raised by such a fill when the
+// segment closes through it. A stop moved by a fill is live for every later segment of the same chart bar.
 bool evTp1 = false
 bool evTp2 = false
 bool evTp3 = false
@@ -425,107 +436,124 @@ float lastR = na
 int evDir = 0
 if not na(cur)
     evDir := cur.dir
+// Intrabar prices of the chart bar. The arrays are empty (or na) when the chart timeframe is too small for
+// the requested intrabar timeframe or the bar is older than the intrabar history TradingView provides.
+string ibTf = timeframe.in_seconds() >= 86400 ? "60" : timeframe.in_seconds() >= 14400 ? "15" : timeframe.in_seconds() >= 3600 ? "5" : "1"
+[ibO, ibH, ibL, ibC] = request.security_lower_tf(syminfo.tickerid, ibTf, [open, high, low, close], ignore_invalid_timeframe = true)
+var int managedBars = 0
+var int replayedBars = 0
 if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
     int d = cur.dir
-    // The only trail price available at this opening is from the previous completed bar.
-    if trailOn and (trailFrom == 1 ? cur.hit1 : cur.hit2)
-        float tv = d == 1 ? chandL[1] : chandS[1]
-        if not na(tv)
-            cur.sl := d == 1 ? math.max(cur.sl, tv) : math.min(cur.sl, tv)
-    // Pre-existing opening stop precedes every target and the unknown remaining range.
-    bool openingStopHit = d == 1 ? open <= cur.sl : open >= cur.sl
-    if openingStopHit
-        string reason = activeStopReason(cur)
-        evSl := reason != "BE/Trail"
-        evExit := reason == "BE/Trail"
-        lastR := closeTrade(cur, open, reason)
-        cur := na
-    else
-        // All targets already marketable at the opening fill at their fixed limit prices.
-        if not cur.hit1 and (d == 1 ? open >= cur.tp1 : open <= cur.tp1)
-            cur.hit1 := true
-            float w = math.min(w1, cur.openW)
-            cur.realized += w * k1
-            cur.openW -= w
-            if beOn
-                cur.sl := d == 1 ? math.max(cur.sl, cur.entry) : math.min(cur.sl, cur.entry)
-            evTp1 := true
-            hitMark(1, cur.tp1, bullCol)
-        if cur.openW > 1e-9 and cur.hit1 and not cur.hit2 and (d == 1 ? open >= cur.tp2 : open <= cur.tp2)
-            cur.hit2 := true
-            float w = math.min(w2, cur.openW)
-            cur.realized += w * k2
-            cur.openW -= w
-            cur.sl := d == 1 ? math.max(cur.sl, cur.tp1) : math.min(cur.sl, cur.tp1)
-            evTp2 := true
-            hitMark(2, cur.tp2, bullCol)
-        if cur.openW <= 1e-9
-            lastR := closeTrade(cur, cur.hit2 ? cur.tp2 : cur.tp1, "TP")
+    bool useIb = intrabar and not na(ibH) and ibH.size() > 0
+    int segCount = useIb ? ibH.size() : 1
+    managedBars += 1
+    replayedBars += useIb ? 1 : 0
+    for seg = 0 to segCount - 1
+        if na(cur)
+            break
+        float bo = useIb ? ibO.get(seg) : open
+        float bh = useIb ? ibH.get(seg) : high
+        float bl = useIb ? ibL.get(seg) : low
+        float bc = useIb ? ibC.get(seg) : close
+        // The only trail price available is from the previous completed chart bar.
+        if trailOn and (trailFrom == 1 ? cur.hit1 : cur.hit2)
+            float tv = d == 1 ? chandL[1] : chandS[1]
+            if not na(tv)
+                cur.sl := d == 1 ? math.max(cur.sl, tv) : math.min(cur.sl, tv)
+        // A stop already through at the open precedes every target and the unknown remaining range.
+        bool openingStopHit = d == 1 ? bo <= cur.sl : bo >= cur.sl
+        if openingStopHit
+            string reason = activeStopReason(cur)
+            evSl := reason != "BE/Trail"
+            evExit := reason == "BE/Trail"
+            lastR := closeTrade(cur, bo, reason)
             cur := na
-        if not na(cur) and cur.hit2 and not cur.hit3 and not na(cur.tp3) and (d == 1 ? open >= cur.tp3 : open <= cur.tp3)
-            cur.hit3 := true
-            cur.realized += cur.openW * k3
-            cur.openW := 0.0
-            evTp3 := true
-            hitMark(3, cur.tp3, bullCol)
-            lastR := closeTrade(cur, cur.tp3, "TP3")
-            cur := na
-        if not na(cur)
-            // Opening target fills are known events. Their BE/TP2 stop is active now;
-            // an activated chandelier may use only the previous completed bar.
-            if trailOn and (trailFrom == 1 ? cur.hit1 : cur.hit2)
-                float tv = d == 1 ? chandL[1] : chandS[1]
-                if not na(tv)
-                    cur.sl := d == 1 ? math.max(cur.sl, tv) : math.min(cur.sl, tv)
-            // Unknown intrabar order remains stop-first after known opening events.
-            bool stopHit = d == 1 ? low <= cur.sl : high >= cur.sl
-            if stopHit
-                float px = (d == 1 and open < cur.sl) or (d == -1 and open > cur.sl) ? open : cur.sl
-                string reason = activeStopReason(cur)
-                evSl := reason != "BE/Trail"
-                evExit := reason == "BE/Trail"
-                lastR := closeTrade(cur, px, reason)
+        else
+            // All targets already marketable at the open fill at their fixed limit prices.
+            if not cur.hit1 and (d == 1 ? bo >= cur.tp1 : bo <= cur.tp1)
+                cur.hit1 := true
+                float w = math.min(w1, cur.openW)
+                cur.realized += w * k1
+                cur.openW -= w
+                if beOn
+                    cur.sl := d == 1 ? math.max(cur.sl, cur.entry) : math.min(cur.sl, cur.entry)
+                evTp1 := true
+                hitMark(1, cur.tp1, bullCol)
+            if cur.openW > 1e-9 and cur.hit1 and not cur.hit2 and (d == 1 ? bo >= cur.tp2 : bo <= cur.tp2)
+                cur.hit2 := true
+                float w = math.min(w2, cur.openW)
+                cur.realized += w * k2
+                cur.openW -= w
+                cur.sl := d == 1 ? math.max(cur.sl, cur.tp1) : math.min(cur.sl, cur.tp1)
+                evTp2 := true
+                hitMark(2, cur.tp2, bullCol)
+            if cur.openW <= 1e-9
+                lastR := closeTrade(cur, cur.hit2 ? cur.tp2 : cur.tp1, "TP")
                 cur := na
-            else
-                // A stop raised by a range fill is not tested against this bar's low (the low may
-                // have printed before the fill); the one certain case is handled after the targets.
-                if not cur.hit1 and (d == 1 ? high >= cur.tp1 : low <= cur.tp1)
-                    cur.hit1 := true
-                    float w = math.min(w1, cur.openW)
-                    cur.realized += w * k1
-                    cur.openW -= w
-                    if beOn
-                        cur.sl := d == 1 ? math.max(cur.sl, cur.entry) : math.min(cur.sl, cur.entry)
-                    evTp1 := true
-                    hitMark(1, cur.tp1, bullCol)
-                if cur.openW > 1e-9 and cur.hit1 and not cur.hit2 and (d == 1 ? high >= cur.tp2 : low <= cur.tp2)
-                    cur.hit2 := true
-                    float w = math.min(w2, cur.openW)
-                    cur.realized += w * k2
-                    cur.openW -= w
-                    cur.sl := d == 1 ? math.max(cur.sl, cur.tp1) : math.min(cur.sl, cur.tp1)
-                    evTp2 := true
-                    hitMark(2, cur.tp2, bullCol)
-                if cur.openW <= 1e-9
-                    lastR := closeTrade(cur, cur.hit2 ? cur.tp2 : cur.tp1, "TP")
-                    cur := na
-                if not na(cur) and cur.hit2 and not cur.hit3 and not na(cur.tp3) and (d == 1 ? high >= cur.tp3 : low <= cur.tp3)
-                    cur.hit3 := true
-                    cur.realized += cur.openW * k3
-                    cur.openW := 0.0
-                    evTp3 := true
-                    hitMark(3, cur.tp3, bullCol)
-                    lastR := closeTrade(cur, cur.tp3, "TP3")
-                    cur := na
-                // The low was above the old stop, so the close can only be at or through the stop if a
-                // fill on this bar raised it (breakeven after TP1, TP1 lock after TP2). The close is the
-                // bar's last trade, so price crossed the new stop after that fill: exit there.
-                if closeStop and not na(cur) and (d == 1 ? close <= cur.sl : close >= cur.sl)
+            if not na(cur) and cur.hit2 and not cur.hit3 and not na(cur.tp3) and (d == 1 ? bo >= cur.tp3 : bo <= cur.tp3)
+                cur.hit3 := true
+                cur.realized += cur.openW * k3
+                cur.openW := 0.0
+                evTp3 := true
+                hitMark(3, cur.tp3, bullCol)
+                lastR := closeTrade(cur, cur.tp3, "TP3")
+                cur := na
+            if not na(cur)
+                // Opening target fills are known events. Their BE/TP1 stop is active now;
+                // an activated chandelier may use only the previous completed chart bar.
+                if trailOn and (trailFrom == 1 ? cur.hit1 : cur.hit2)
+                    float tv = d == 1 ? chandL[1] : chandS[1]
+                    if not na(tv)
+                        cur.sl := d == 1 ? math.max(cur.sl, tv) : math.min(cur.sl, tv)
+                // Unknown order inside the segment remains stop-first after the known opening events.
+                bool stopHit = d == 1 ? bl <= cur.sl : bh >= cur.sl
+                if stopHit
+                    float px = (d == 1 and bo < cur.sl) or (d == -1 and bo > cur.sl) ? bo : cur.sl
                     string reason = activeStopReason(cur)
                     evSl := reason != "BE/Trail"
                     evExit := reason == "BE/Trail"
-                    lastR := closeTrade(cur, cur.sl, reason)
+                    lastR := closeTrade(cur, px, reason)
                     cur := na
+                else
+                    // A stop raised by a range fill is not tested against this segment's low (the low may
+                    // have printed before the fill); the one certain case is handled after the targets.
+                    if not cur.hit1 and (d == 1 ? bh >= cur.tp1 : bl <= cur.tp1)
+                        cur.hit1 := true
+                        float w = math.min(w1, cur.openW)
+                        cur.realized += w * k1
+                        cur.openW -= w
+                        if beOn
+                            cur.sl := d == 1 ? math.max(cur.sl, cur.entry) : math.min(cur.sl, cur.entry)
+                        evTp1 := true
+                        hitMark(1, cur.tp1, bullCol)
+                    if cur.openW > 1e-9 and cur.hit1 and not cur.hit2 and (d == 1 ? bh >= cur.tp2 : bl <= cur.tp2)
+                        cur.hit2 := true
+                        float w = math.min(w2, cur.openW)
+                        cur.realized += w * k2
+                        cur.openW -= w
+                        cur.sl := d == 1 ? math.max(cur.sl, cur.tp1) : math.min(cur.sl, cur.tp1)
+                        evTp2 := true
+                        hitMark(2, cur.tp2, bullCol)
+                    if cur.openW <= 1e-9
+                        lastR := closeTrade(cur, cur.hit2 ? cur.tp2 : cur.tp1, "TP")
+                        cur := na
+                    if not na(cur) and cur.hit2 and not cur.hit3 and not na(cur.tp3) and (d == 1 ? bh >= cur.tp3 : bl <= cur.tp3)
+                        cur.hit3 := true
+                        cur.realized += cur.openW * k3
+                        cur.openW := 0.0
+                        evTp3 := true
+                        hitMark(3, cur.tp3, bullCol)
+                        lastR := closeTrade(cur, cur.tp3, "TP3")
+                        cur := na
+                    // The low was above the old stop, so the segment can only close at or through the stop if
+                    // a fill inside it raised the stop (breakeven after TP1, TP1 lock after TP2). The close is
+                    // the segment's last trade, so price crossed the new stop after that fill: exit there.
+                    if closeStop and not na(cur) and (d == 1 ? bc <= cur.sl : bc >= cur.sl)
+                        string reason = activeStopReason(cur)
+                        evSl := reason != "BE/Trail"
+                        evExit := reason == "BE/Trail"
+                        lastR := closeTrade(cur, cur.sl, reason)
+                        cur := na
     if not na(cur)
         extendTrade(cur, bar_index + 1)
         if not na(cur.lnSl)
@@ -601,8 +629,8 @@ string dashPos = switch dashPosIn
 var table dash = na
 if showDash and barstate.islast
     if na(dash)
-        dash := table.new(dashPos, 2, 13, bgcolor = color.new(chart.bg_color, 0), frame_color = color.new(neutCol, 40), frame_width = 1, border_color = color.new(neutCol, 80), border_width = 1)
-    string profShort = profile == PROF_SNP ? "Sniper" : profile == PROF_HP ? "High-Prob" : profile == PROF_BAL ? "Balanced" : profile == PROF_RUN ? "Runner" : "Custom"
+        dash := table.new(dashPos, 2, 14, bgcolor = color.new(chart.bg_color, 0), frame_color = color.new(neutCol, 40), frame_width = 1, border_color = color.new(neutCol, 80), border_width = 1)
+    string profShort = profile == PROF_SHD ? "Shield" : profile == PROF_SNP ? "Sniper" : profile == PROF_HP ? "High-Prob" : profile == PROF_BAL ? "Balanced" : profile == PROF_RUN ? "Runner" : "Custom"
     table.cell(dash, 0, 0, "APEX · " + profShort + " · " + timeframe.period, text_color = chart.fg_color, text_size = size.small, text_halign = text.align_center, bgcolor = color.new(neutCol, 75))
     table.merge_cells(dash, 0, 0, 1, 0)
     color netCol = st.net > 0 ? bullCol : st.net < 0 ? bearCol : chart.fg_color
@@ -625,9 +653,10 @@ if showDash and barstate.islast
         openCol := liveR >= 0 ? bullCol : bearCol
     dashRow(dash, 10, tr("Open trade", "الصفقة المفتوحة"), openTxt, openCol)
     dashRow(dash, 11, tr("Blocked by cost guard", "إشارات حجبها حارس التكلفة"), str.tostring(guardBlocked), chart.fg_color)
+    dashRow(dash, 12, tr("Bars replayed intrabar", "شموع أُعيد تمثيلها من الداخل"), pctOf(replayedBars, managedBars), chart.fg_color)
     string note = timeframe.in_seconds() < 14400 ? tr("Backtests found no edge below 4H", "الاختبارات لم تجد أفضلية تحت فريم 4 ساعات") : st.n < 30 ? tr("Small sample: fewer than 30 trades", "عيّنة صغيرة: أقل من 30 صفقة") : tr("Past simulation on this chart, not a forecast", "محاكاة لماضي هذا الشارت وليست توقعًا")
-    table.cell(dash, 0, 12, note, text_color = color.new(chart.fg_color, 30), text_size = size.tiny, text_halign = text.align_center)
-    table.merge_cells(dash, 0, 12, 1, 12)
+    table.cell(dash, 0, 13, note, text_color = color.new(chart.fg_color, 30), text_size = size.tiny, text_halign = text.align_center)
+    table.merge_cells(dash, 0, 13, 1, 13)
 
 // ───────────────────────────── Plots ─────────────────────────────
 color emaCol = ema21 >= ema55 ? bullCol : bearCol

@@ -15,10 +15,7 @@ import numpy as np
 
 import datasets as ds
 
-try:
-    import apex_engine as E
-except Exception:  # pragma: no cover
-    import engine_b as E
+import engine_b as E
 
 LAST_BAR_T = 1794207600  # 2026-11-09 07:00 UTC, the bar the reference values belong to
 REF = {

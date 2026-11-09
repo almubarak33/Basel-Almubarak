@@ -5,7 +5,8 @@
     engine_b.py   fast numpy / numba engine
 
 Neither port is trusted: this test only proves that they AGREE.  Every disagreement has to be settled against
-the Pine source (see the report that accompanies this file), never by copying one port into the other.
+the Pine source, never by copying one port into the other.  On a mismatch the test prints the first diverging
+bar and both engines' intermediate values around it (indicators, scores, signals, stop distances, chandelier).
 
 What is compared for every (dataset, Params) case
   * series    scoreL, scoreS, longSig, shortSig exactly; atr and htfTrend within 1e-9 relative with identical
@@ -16,7 +17,8 @@ What is compared for every (dataset, Params) case
   * trades    field by field (ints / bools / strings / None exactly, floats within 1e-9)
   * open_trade, stats (ints exactly, floats within 1e-9)
 plus four engine-level sections
-  * errors    the script's runtime.error() input checks raise ValueError in both ports
+  * errors    the script's runtime.error() input checks (L103-L110), option strings outside the input's
+              options=[...] list and a missing HTF raise ValueError in both ports
   * edge      run() on charts of 1 .. 300 bars, on the script's "HTF not longer than the chart" fallback
               (L120), and on HTF histories that start late / end early / are too short for the EMA
   * synth     run() on synthetic integer-tick charts (exact ties, flat stretches, zero ATR, gaps) with random
@@ -27,8 +29,10 @@ plus four engine-level sections
 
 Datasets: every name returned by datasets.list_datasets(), full length (no slicing unless --max-bars is given;
 with --max-bars N the LAST N chart bars are used for BOTH engines, the HTF bars stay complete).
-Parameter matrix: the full matrix (FULL_VARIANTS, ~75 Params) on a representative subset (FULL_DATASETS) and
+Parameter matrix: the full matrix (FULL_VARIANTS, ~90 Params) on a representative subset (FULL_DATASETS) and
 the CORE_VARIANTS (default, the 4 profiles, 2 loose-filter stress sets) on every other dataset.
+
+Runtime: about 3.5 minutes on 4 cores (engine_a ~12 CPU-minutes, engine_b ~7 CPU-seconds).
 
 Usage:  python3 test_parity.py [--jobs N] [--max-bars N] [--datasets a,b] [--variants x,y] [--all-full]
                                [--no-fuzz] [--fuzz N] [--synth N] [-v]
@@ -152,10 +156,6 @@ FULL_DATASETS = (
 
 
 # ───────────────────────────── comparison helpers ─────────────────────────────
-def _isnan(x) -> bool:
-    return isinstance(x, float) and x != x
-
-
 def feq(a, b, tol: float = TOL) -> bool:
     """floats within tol (relative, absolute below 1); nan only equals nan; inf only equals the same inf."""
     if a is None or b is None:
@@ -523,8 +523,9 @@ def run_dataset(job: tuple) -> dict:
 
 # ───────────────────────────── engine-level sections ─────────────────────────────
 def check_errors() -> tuple[int, list[str]]:
-    """The script's runtime.error() input checks (Pine L103-L110) and misspelt option strings -> ValueError in
-    both ports; valid boundary inputs must not raise in either."""
+    """The script's runtime.error() input checks (Pine L103-L110), misspelt option strings (impossible in the
+    script: input.string(..., options=[...]) on L41 / L45 / L85) and a missing HTF -> ValueError in both ports;
+    valid boundary inputs must not raise in either."""
     name = "OANDA_XAUUSD_4h" if "OANDA_XAUUSD_4h" in ds.list_datasets() else ds.list_datasets()[0]
     chart = ds.load(name)
     chart = {k: v[:600] for k, v in chart.items()}
@@ -541,13 +542,16 @@ def check_errors() -> tuple[int, list[str]]:
         ("unknown profile", dict(profile="Balanced"), True),
         ("unknown dirMode", dict(dirMode="Long Only"), True),
         ("unknown costMode", dict(costMode="custom"), True),
+        ("htf=None although the HTF is longer than the chart", dict(_htf=None), True),
     ]
     msgs = []
     for label, kw, should_raise in cases:
+        kw = dict(kw)
+        h = kw.pop("_htf", htf)
         got = []
         for eng in (A, B):
             try:
-                eng.run(chart, htf, eng.Params(**kw), market)
+                eng.run(chart, h, eng.Params(**kw), market)
                 got.append(False)
             except ValueError:
                 got.append(True)

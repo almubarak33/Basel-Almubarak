@@ -25,13 +25,17 @@ def emit(s=""):
 
 
 def run(uni, dir_mode="Auto", profile="AUTO", mgmt=None, cost_fn=None, v2_sim=True, **pkw):
-    """v2_sim: use the v2 simulation rule (same-bar close through a raised stop) when the engine supports it."""
+    """Chart-bar simulation.  v2_sim=True uses the v2 rule closeStop = 1, False the v1 rule (0)."""
     def mg(s):
         m = dict(mgmt) if mgmt else v2.mgmt(s.market, profile)
-        if v2_sim and getattr(v2, "HAS_CLOSE_STOP", False):
-            m["closeStop"] = True
+        m["closeStop"] = 1 if v2_sim else 0
         return m
     return rl.run_universe(uni, params_fn=lambda s: v2.params(s.market, dir_mode, **pkw), mgmt_fn=mg, cost_fn=cost_fn)
+
+
+def frontier_mgmt(k1, w1):
+    return {"k1": k1, "k2": max(1.5, 2 * k1), "k3": max(4.0, 4 * k1), "w1": w1, "w2": min(0.25, 1 - w1),
+            "trailOn": True, "trailFrom": 1, "beOn": True}
 
 
 def pct(x):
@@ -93,23 +97,22 @@ def main():
 
     def frontier(tf, rows):
         sub = by_tf[tf]
-        emit(CELLS_HEAD.format(first="الهدف الأول / نسبة الإغلاق"))
+        emit(CELLS_HEAD.format(first="الهدف الأول / نسبة الإغلاق عنده"))
         for k1, w1 in rows:
-            m = {"k1": k1, "k2": max(1.5, 2 * k1), "k3": max(4.0, 4 * k1), "w1": w1, "w2": 0.25 if w1 < 1 else 0.0,
-                 "trailOn": True, "trailFrom": 1, "beOn": True}
-            emit(cells_row(f"{k1:.2f}R / {int(100 * w1)}%", run(sub, mgmt=m)))
+            emit(cells_row(f"{k1:.2f}R / {int(100 * w1)}%", run(sub, mgmt=frontier_mgmt(k1, w1))))
         emit(cells_row("Trend Runner (1R/2R/8R)", run(sub, profile="RUN")))
 
-    emit("\n### T3 ثمن نسبة النجاح: الفريم اليومي، الاتجاه Auto\n")
-    frontier("1D", ((0.05, 1.0), (0.08, 1.0), (0.10, 1.0), (0.15, 1.0), (0.20, 1.0), (0.30, 1.0), (0.15, 0.5), (0.30, 0.5), (0.50, 0.5), (1.00, 0.5)))
-    emit("\n### T3b ثمن نسبة النجاح: فريم 4 ساعات، الاتجاه Auto\n")
-    frontier("4h", ((0.05, 1.0), (0.10, 1.0), (0.15, 0.5), (0.30, 0.5), (1.00, 0.5)))
+    rows = ((0.05, 1.0), (0.05, 0.75), (0.05, 0.5), (0.10, 0.5), (0.15, 0.5), (0.30, 0.5), (0.50, 0.5), (1.00, 0.5))
+    emit("\n### T3 ثمن نسبة النجاح: الفريم اليومي، الاتجاه Auto (محاكاة على الشمعة اليومية)\n")
+    frontier("1D", rows)
+    emit("\n### T3b ثمن نسبة النجاح: فريم 4 ساعات، الاتجاه Auto (محاكاة على شمعة 4 ساعات)\n")
+    frontier("4h", rows)
 
     emit("\n### T4 ملفات إدارة الصفقة في النسخة المطوّرة (الاتجاه Auto)\n")
     emit(CELLS_HEAD.format(first="الفريم / الملف"))
     for tf in ("1D", "4h"):
-        for prof, name in (("SNP", "Sniper"), ("HP", "High-Probability"), ("BAL", "Balanced"), ("RUN", "Trend Runner")):
-            emit(cells_row(f"{TF_AR[tf]} — {name}", run(by_tf[tf], profile=prof)))
+        for prof in ("SHD", "SNP", "HP", "BAL", "RUN"):
+            emit(cells_row(f"{TF_AR[tf]} — {v2.PROFILE_NAMES[prof]}", run(by_tf[tf], profile=prof)))
 
     emit("\n### T5 مصدر الأفضلية: إشارات السكربت مقابل دخول عشوائي (صفقة 1R مقابل 1R، بدون تكلفة)\n")
     emit("| الفريم / الاتجاه | إشارات السكربت: صفقات | نجاح | دخول عشوائي: نجاح | عشوائي والتوافق 7/7: نجاح |\n|---|---|---|---|---|")
@@ -185,20 +188,65 @@ def main():
     gold = [s for s in rl.universe(roles=("primary", "replica")) if s.underlying == "GOLD"]
     for s in sorted(gold, key=lambda s: (rl.TF_ORDER.index(s.tf), s.name)):
         emit(full_row(f"{s.name} — الأصلية", run([s], dir_mode="Both", v2_sim=False)))
-        for prof, name in (("SNP", "Sniper"), ("HP", "High-Probability"), ("RUN", "Trend Runner")):
-            emit(full_row(f"{s.name} — المطوّرة {name}", run([s], profile=prof)))
+        for prof in ("SHD", "SNP", "HP", "RUN"):
+            emit(full_row(f"{s.name} — المطوّرة {v2.PROFILE_NAMES[prof]}", run([s], profile=prof)))
 
     emit("\n### T9 النسخة المطوّرة حسب نوع السوق (4 ساعات + يومي، الإعدادات الافتراضية)\n")
     emit(CELLS_HEAD.format(first="السوق"))
     for a in ("metal", "energy", "fx", "index", "stock", "crypto"):
         emit(cells_row(ASSET_AR[a], [t for t in t_v2 if t["asset"] == a and t["tf"] in ("4h", "1D")]))
 
-    if getattr(v2, "HAS_CLOSE_STOP", False):
-        emit("\n### T10 أثر تصحيح «الإغلاق عبر الوقف المرفوع في نفس الشمعة» (الاتجاه Auto، ملف High-Probability)\n")
-        emit(FULL_HEAD.format(first="الفريم / القاعدة"))
-        for tf in ("4h", "1D"):
-            emit(full_row(f"{TF_AR[tf]} — قاعدة النسخة الأصلية", run(by_tf[tf], profile="HP", v2_sim=False)))
-            emit(full_row(f"{TF_AR[tf]} — القاعدة المصحّحة", run(by_tf[tf], profile="HP")))
+    emit("\n### T10 إعادة تمثيل الصفقات اليومية على بيانات داخل الشمعة (ساعة / 4 ساعات)، الاتجاه Auto\n")
+    emit("القاعدة 0 = النسخة الأصلية (ترحيل الباقي لافتتاح الشمعة التالية)، القاعدة 1 = إغلاق مؤكد عبر الوقف المرفوع، "
+         "القاعدة 2 = أسوأ افتراض (أي ملامسة للوقف المرفوع تُحسب خروجًا)، التمثيل الداخلي = تتبّع الترتيب الفعلي.\n")
+    emit(FULL_HEAD.format(first="الملف / طريقة المحاكاة"))
+    daily = by_tf["1D"]
+    covered = [s for s in daily if rl.fine_for(s)[0]]
+    for prof in ("SHD", "SNP", "HP", "BAL", "RUN"):
+        fine, chart = [], {0: [], 1: [], 2: []}
+        for s in covered:
+            p = v2.params(s.market, "Auto")
+            r = rl.replay(s, p, v2.mgmt(s.market, prof, 1))
+            fine += r[0]
+            chart[1] += r[1]
+            for rule in (0, 2):
+                chart[rule] += rl.replay(s, p, v2.mgmt(s.market, prof, rule))[1]
+        name = v2.PROFILE_NAMES[prof]
+        emit(full_row(f"{name} — شمعة يومية، القاعدة 0", chart[0]))
+        emit(full_row(f"{name} — شمعة يومية، القاعدة 1", chart[1]))
+        emit(full_row(f"{name} — شمعة يومية، القاعدة 2", chart[2]))
+        emit(full_row(f"**{name} — تمثيل داخلي**", fine))
+    emit(f"\nالسلاسل اليومية التي لها بيانات داخلية كافية: {len(covered)} — " + "، ".join(
+        f"{s.underlying} ({rl.fine_for(s)[0].rsplit('_', 1)[1]})" for s in covered))
+    emit("\nالتمثيل الداخلي مقسومًا إلى بيانات الضبط والبيانات الجديدة:\n")
+    emit(CELLS_HEAD.format(first="الملف"))
+    for prof in ("SHD", "SNP", "HP", "RUN"):
+        fine = []
+        for s in covered:
+            fine += rl.replay(s, v2.params(s.market, "Auto"), v2.mgmt(s.market, prof, 1))[0]
+        emit(cells_row(v2.PROFILE_NAMES[prof], fine))
+
+    emit("\n### T11 حساسية نسبة النجاح للتكلفة (يومي، الاتجاه Auto، محاكاة على الشمعة اليومية بالقاعدة 1)\n")
+    emit(FULL_HEAD.format(first="الملف / مضاعف التكلفة"))
+    for prof in ("SHD", "SNP", "HP", "RUN"):
+        for mult in (1, 2, 3, 5):
+            emit(full_row(f"{v2.PROFILE_NAMES[prof]} — ×{mult}",
+                          run(daily, profile=prof, cost_fn=lambda s, k=mult: auto_cost(s) * k)))
+
+    emit("\n### T12 توزيع نتائج الصفقات (يومي، الاتجاه Auto، القاعدة 1)\n")
+    emit("| الملف | خسارة أكبر من 0.5R | خسارة صغيرة | ربح حتى 0.05R (شبه تعادل) | ربح 0.05–0.25R | ربح 0.25–1R | ربح أكبر من 1R | وسيط الصفقة | متوسط الرابحة | متوسط الخاسرة |\n|---|---|---|---|---|---|---|---|---|---|")
+    for prof in ("SHD", "SNP", "HP", "RUN"):
+        R = np.array([t["R"] for t in run(daily, profile=prof)])
+        cuts = ((-99, -0.5), (-0.5, 0.0), (0.0, 0.05), (0.05, 0.25), (0.25, 1.0), (1.0, 99))
+        cells = " | ".join(f"{100 * ((R > lo) & (R <= hi)).mean():.1f}%" for lo, hi in cuts)
+        emit(f"| {v2.PROFILE_NAMES[prof]} | {cells} | {np.median(R):+.3f}R | {R[R > 0].mean():+.3f}R | {R[R < 0].mean():+.3f}R |")
+
+    emit("\n### T13 أثر قاعدة المحاكاة على الشمعة (يومي و4 ساعات، الاتجاه Auto)\n")
+    emit(FULL_HEAD.format(first="الفريم / الملف / القاعدة"))
+    for tf in ("1D", "4h"):
+        for prof in ("SHD", "HP"):
+            emit(full_row(f"{TF_AR[tf]} — {v2.PROFILE_NAMES[prof]} — القاعدة 0", run(by_tf[tf], profile=prof, v2_sim=False)))
+            emit(full_row(f"{TF_AR[tf]} — {v2.PROFILE_NAMES[prof]} — القاعدة 1", run(by_tf[tf], profile=prof)))
 
     path = os.path.join(OUT, "tables.md")
     with open(path, "w", encoding="utf-8") as fh:

@@ -19,10 +19,7 @@ import numpy as np
 
 import datasets as ds
 
-try:                                   # canonical engine once reconciliation has produced it
-    import apex_engine as E
-except Exception:                      # pragma: no cover - early exploration
-    import engine_b as E
+import engine_v2 as E                  # verified v1 port (engine_b) + the v2 management rule and the replay
 
 IS_FRACTION = 0.60
 TF_ORDER = ["5m", "15m", "1h", "4h", "1D"]
@@ -153,6 +150,52 @@ def run_series(s: Series, params=None, mgmt: dict | None = None, cost_pct: float
             "risk_pct": 100.0 * r["risk"] / r["entry"], "bars": r["exit_bar"] - eb,
         })
     return trades, f
+
+
+def fine_for(s: Series, min_chart_bars: int = 400):
+    """Finer series of the SAME feed that covers at least `min_chart_bars` chart bars (1h preferred, then 4h
+    for daily charts; 15m for 4h charts).  -> (name, bars) or (None, None)."""
+    m = s.market
+    for itv in {"1D": ("1h", "4h"), "4h": ("15m",), "1h": ("5m",)}.get(s.tf, ()):
+        name = f"{m.exchange}_{m.ticker}_{itv}"
+        try:
+            fine = ds.load(name)
+        except OSError:
+            continue
+        di = np.searchsorted(s.chart["t"], fine["t"], side="right") - 1
+        if len(np.unique(di[di >= 0])) >= min_chart_bars:
+            return name, fine
+    return None, None
+
+
+def replay(s: Series, params=None, mgmt: dict | None = None, cost_pct: float | None = None):
+    """Intrabar replay of one series (see engine_v2.magnify).
+
+    -> None when no finer series is available, else (replayed trades, chart-bar trades) over the same
+    period, both as trade dicts like run_series() returns."""
+    name, fine = fine_for(s)
+    if name is None:
+        return None
+    p = params or E.Params()
+    f = E.features(s.chart, s.htf, p, s.market, s.base)
+    m = dict(E.mgmt_of(p, s.market))
+    if mgmt:
+        m.update(mgmt)
+    rec_f, rec_c, fb, _d0 = E.magnify(s.chart, f, fine, m, cost_pct)
+    t_split = int(s.chart["t"][min(s.split, s.n - 1)])
+
+    def conv(rec, times):
+        out = []
+        for r in E.trades_list(rec):
+            t = int(times[r["entry_bar"]])
+            out.append({"series": s.name, "underlying": s.underlying, "asset": s.asset, "tf": s.tf, "group": s.group,
+                        "seg": "IS" if t < t_split else "OOS", "dir": r["dir"], "entry_bar": r["entry_bar"],
+                        "exit_bar": r["exit_bar"], "t": t, "trig": r["trig"], "score": r["score"], "R": r["R"],
+                        "gross_R": r["gross_R"], "cost_R": r["cost_R"], "hit1": r["hit1"], "hit2": r["hit2"],
+                        "hit3": r["hit3"], "reason": r["reason"], "risk_pct": 100.0 * r["risk"] / r["entry"],
+                        "bars": r["exit_bar"] - r["entry_bar"], "fine": name})
+        return out
+    return conv(rec_f, fb["t"]), conv(rec_c, s.chart["t"])
 
 
 def run_universe(series: list[Series], params=None, mgmt=None, cost_pct=None, sig_filter=None,
