@@ -1,0 +1,25 @@
+ok   limit fill: entry at the limit, risk measured from the fill
+ok   limit fill: TP1 then breakeven exit at the next open
+ok   limit fill: counters
+ok   limit fill at a gap open uses the open
+ok   fill bar that also reaches the stop is a stop
+ok   unfilled limit expires after pbBars
+ok   pending order cancelled when the bar opens beyond its stop
+ok   a new signal replaces the pending order
+ok   short limit fill and stop
+ok   market mode enters at the close
+ok   reverse on: opposite signal closes at the close
+ok   reverse off: opposite signal ignored
+ok   time exit
+ok   cost scaled by entry / risk of the fill
+ok   ORB: fires once, on the first close above the 15-minute range
+ok   ORB: with the setup disabled the raw condition repeats (no 'fired' latch)
+ok   VWAP: resets on the new day
+ok   VWAP reclaim: one signal after >= 6 closes below
+ok   break & retest: fires on the retest bar only
+ok   pivot high reported 5 bars after the peak
+ok   barssince
+ok   session mask follows New York daylight saving
+ok   Focus-equivalent configuration reproduces engine_b (176 dataset x profile cases, 16817 trades)
+PASS
+exit 0

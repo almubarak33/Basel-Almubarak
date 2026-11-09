@@ -95,7 +95,9 @@ class FParams:                       # defaults == the Pine input defaults
     costCustom: float = 0.05
 
 
-PROFILES = {  # k1, k2, k3, w1, w2, trailOn, trailFrom, beOn  (the script's profile table)
+PROFILES = {  # k1, k2, k3, w1, w2, trailOn, trailFrom, beOn  (the script's profile table; SHD / SNP are new in v2)
+    "SHD": {"k1": 0.05, "k2": 1.5, "k3": 4.0, "w1": 0.50, "w2": 0.25, "trailOn": False, "trailFrom": 1, "beOn": True},
+    "SNP": {"k1": 0.2, "k2": 1.5, "k3": 4.0, "w1": 0.60, "w2": 0.20, "trailOn": False, "trailFrom": 1, "beOn": True},
     "MW":  {"k1": 0.4, "k2": 1.5, "k3": 4.0, "w1": 0.60, "w2": 0.20, "trailOn": False, "trailFrom": 1, "beOn": True},
     "BAL": {"k1": 1.0, "k2": 3.0, "k3": 5.0, "w1": 0.50, "w2": 0.25, "trailOn": False, "trailFrom": 1, "beOn": True},
     "HW":  {"k1": 0.5, "k2": 2.0, "k3": 5.0, "w1": 0.50, "w2": 0.25, "trailOn": False, "trailFrom": 1, "beOn": True},
@@ -836,6 +838,73 @@ def simulate(ctx: dict, f: dict, p: FParams, mgmt: dict | None = None, cost_pct_
                        "exit_px": r[C_XPX], "reason": REASONS[int(r[C_REASON])], "gross_R": r[C_GROSS],
                        "cost_R": r[C_COST], "R": r[C_R]})
     return trades, B.stats_dict(stats), {"signals": int(n_sig), "filled": int(n_fill), "unfilled": int(n_miss)}
+
+
+def _trades_from(rec):
+    out = []
+    for r in rec.tolist():
+        tp3 = r[C_TP3]
+        out.append({"dir": int(r[C_DIR]), "entry_bar": int(r[C_EBAR]), "exit_bar": int(r[C_XBAR]),
+                    "setup": SETUPS[int(r[C_TRIG])], "score": int(r[C_SCORE]), "entry": r[C_ENTRY], "sl0": r[C_SL0],
+                    "risk": r[C_RISK], "tp1": r[C_TP1], "tp2": r[C_TP2], "tp3": None if tp3 != tp3 else tp3,
+                    "hit1": r[C_HIT1] != 0.0, "hit2": r[C_HIT2] != 0.0, "hit3": r[C_HIT3] != 0.0,
+                    "exit_px": r[C_XPX], "reason": REASONS[int(r[C_REASON])], "gross_R": r[C_GROSS],
+                    "cost_R": r[C_COST], "R": r[C_R]})
+    return out
+
+
+def replay(ctx: dict, f: dict, fine: dict, p: FParams, mgmt: dict | None = None):
+    """Intrabar replay (same idea as engine_v2.magnify): signals, stop distances and the chandelier come from
+    the chart timeframe; fills, stops and targets are decided bar by bar on finer bars of the same feed.
+    A signal acts on the last fine bar of its chart bar; a pending limit order stays valid for pbBars chart bars
+    (converted to fine bars).  Both simulations start flat on the first chart bar that has fine data.
+    -> (replayed trades, chart-bar trades over the same period, times of the fine bars, first chart bar)."""
+    ch = ctx["chart"]
+    m = dict(mgmt_of(ctx["market"], p))
+    if mgmt:
+        m.update(mgmt)
+    ct = np.asarray(ch["t"])
+    di = np.searchsorted(ct, np.asarray(fine["t"]), side="right") - 1
+    keep = di >= 0
+    di = di[keep]
+    fb = {k: np.asarray(v)[keep] for k, v in fine.items()}
+    nf = len(di)
+    last = np.ones(nf, np.bool_)
+    last[:-1] = di[1:] != di[:-1]
+    d0 = int(di[0])
+    ls_c = np.array(f["longSig"], np.bool_)
+    ss_c = np.array(f["shortSig"], np.bool_)
+    ls_c[:d0 + 1] = False
+    ss_c[:d0 + 1] = False
+    ls_f = np.zeros(nf, np.bool_)
+    ss_f = np.zeros(nf, np.bool_)
+    ls_f[last] = ls_c[di[last]]
+    ss_f[last] = ss_c[di[last]]
+    prev = np.maximum(di - 1, 0)
+    ch_l = np.asarray(f["chandL"])[prev].astype(np.float64)
+    ch_s = np.asarray(f["chandS"])[prev].astype(np.float64)
+    ch_l[di == 0] = NAN
+    ch_s[di == 0] = NAN
+    ch_l = np.concatenate([ch_l[1:], [NAN]])
+    ch_s = np.concatenate([ch_s[1:], [NAN]])
+    per_bar = max(1, int(round(nf / max(1, len(np.unique(di))))))
+    args_tail = (float(m["k1"]), float(m["k2"]), float(m["k3"]), float(m["w1"]), float(m["w2"]), bool(m["trailOn"]),
+                 int(m["trailFrom"]), bool(m["beOn"]), float(f["costPct"]), float(f["mintick"]), int(m.get("closeStop", 0)))
+    su_l = np.maximum(f["setupL"], 0).astype(np.int64)
+    su_s = np.maximum(f["setupS"], 0).astype(np.int64)
+    rec_f, _, _, _, _ = _core_fusion(
+        B._f64(fb["o"]), B._f64(fb["h"]), B._f64(fb["l"]), B._f64(fb["c"]), ls_f, ss_f,
+        B._f64(np.asarray(f["slDistL"])[di]), B._f64(np.asarray(f["slDistS"])[di]), ch_l, ch_s,
+        np.ascontiguousarray(su_l[di]), np.ascontiguousarray(su_s[di]),
+        np.ascontiguousarray(np.asarray(f["scoreL"], np.int64)[di]), np.ascontiguousarray(np.asarray(f["scoreS"], np.int64)[di]),
+        *args_tail, bool(f["usePullback"]), float(p.pbFrac), int(p.pbBars) * per_bar, int(p.maxBars) * per_bar, bool(p.reverseOn))
+    rec_c, _, _, _, _ = _core_fusion(
+        B._f64(ch["o"]), B._f64(ch["h"]), B._f64(ch["l"]), B._f64(ch["c"]), ls_c, ss_c,
+        B._f64(f["slDistL"]), B._f64(f["slDistS"]), B._f64(f["chandL"]), B._f64(f["chandS"]),
+        np.ascontiguousarray(su_l), np.ascontiguousarray(su_s),
+        np.ascontiguousarray(f["scoreL"], np.int64), np.ascontiguousarray(f["scoreS"], np.int64),
+        *args_tail, bool(f["usePullback"]), float(p.pbFrac), int(p.pbBars), int(p.maxBars), bool(p.reverseOn))
+    return _trades_from(rec_f), _trades_from(rec_c), fb["t"], d0
 
 
 def run(name: str, p: FParams | None = None, mgmt: dict | None = None):
