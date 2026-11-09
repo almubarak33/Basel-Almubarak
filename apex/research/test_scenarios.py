@@ -409,6 +409,20 @@ def run_gap_tp1_has_no_breakeven(E):
 
 
 @check("sim")
+def run_gap_tp2_activates_trail_on_the_same_bar(E):
+    # chandL[1] = 118.  bar1 (101,111,100,110): TP1 (0.33, openW 0.67, sl 90).
+    # bar2 (121,125,117,124): L393 hit2 false -> no trail yet ; L398 no ; L416 open 121 >= tp2 120 -> hit2 at the
+    #        opening: realized 0.99, openW 0.34, sl = max(90, tp1 110) = 110.  L438-L441: the trail is active NOW
+    #        (cur.hit2) with the previous bar's chandelier: sl = max(110, 118) = 118.
+    #        L443 low 117 <= 118 -> stop ; open 121 is not below 118 -> px = 118 ; "BE/Trail".
+    #        realized = 0.99 + 0.34 * (118 - 100) / 10 = 1.602.
+    res = sim(E, [FLAT, (101, 111, 100, 110), (121, 125, 117, 124)], longs={0: 10}, mgmt=RUN,
+              chandL=[95, 118, 118])
+    expect(res, [trade(1, 0, 2, 100, 10, RUN, 118, "BE/Trail", 1.602, hits=(True, True, False))],
+           stats(n=1, tp1=1, tp2=1, win=1, gross=1.602, net=1.602, peak=1.602, nL=1, netL=1.602))
+
+
+@check("sim")
 def run_tp3_runner(E):
     # bar1 (101,121,100,120): TP1 + TP2 -> realized 0.99, openW 0.34, sl 110.
     # bar2 (120,181,119,180): na chandelier -> sl 110 ; L474 high 181 >= 180 -> hit3: 0.99 + 0.34 * 8 = 3.71.

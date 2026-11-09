@@ -21,6 +21,7 @@ ok    [sim] run_trail_only_after_tp2
 ok    [sim] run_remaining_sl_after_tp1
 ok    [sim] run_remaining_sl_gap_open
 ok    [sim] run_gap_tp1_has_no_breakeven
+ok    [sim] run_gap_tp2_activates_trail_on_the_same_bar
 ok    [sim] run_tp3_runner
 ok    [sim] reversal_on_opposite_signal
 ok    [sim] reversal_short_to_long
@@ -78,5 +79,5 @@ ok    [run] sawtooth_signals_and_first_trades
 ok    [run] small_frame_guard
 ok    [run] htf_alignment_and_ema_length
 
-test_scenarios: 79/79 checks passed in both engines (sim 61/61, indicator 8/8, table 3/3, run 7/7) -> PASS
+test_scenarios: 80/80 checks passed in both engines (sim 62/62, indicator 8/8, table 3/3, run 7/7) -> PASS
 exit 0
