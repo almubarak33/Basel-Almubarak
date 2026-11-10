@@ -78,6 +78,7 @@ anchorCustom = input.timeframe("D", "", group = G_SIG, inline = "anc")
 reverseOn   = input.bool(true, "Opposite signal reverses an open trade", group = G_SIG)
 
 ltfPack     = input.bool(true, "Professional execution pack below 1H", group = G_LTF, tooltip = "On charts below 1H: enter with a limit order on a pullback instead of chasing the close, skip news/exhaustion candles and require a minimum volatility. In the gold tests this raised the 5m/15m win rate from ~55-67% to ~70-82%.")
+freqMode    = input.string("Active (about 4-6 trades a day)", "Trade frequency below 1H", options = ["Active (about 4-6 trades a day)", "Daily (about 1 trade a day)", "Precise (about 2 trades a month)"], group = G_LTF, tooltip = "Gold 5m, 16.8 years of 1-minute data, Sniper management, 2010-2019 / 2020-2026. Precise (all filters, stop at least 0.43% of price, limit entry): 91% / 88% winners, +0.07R / +0.05R per trade, profit factor 1.77 / 1.39. Daily (trend filters and session, stop at least 0.25%, market entry): 83% / 84% winners, -0.035R / -0.010R, profit factor 0.80 / 0.94. Active (no trend or session filter, stop at least 0.25%, market entry): 79% / 80% winners, -0.048R / -0.032R, profit factor 0.74 / 0.81. Every setting that traded once a day or more lost money in this test; only Precise was profitable.")
 precise     = input.bool(true, "Precision entries below 1H: scanner setups only", group = G_LTF, tooltip = "Below 1H the Donchian breakout, SuperTrend pullback and SuperTrend flip triggers are switched off and only the scanner setups (break & retest, opening range, EMA pullback, VWAP reclaim) can open a trade, still behind the trend filters, the volatility floor and the limit entry. On 16.8 years of gold 5m data this gave fewer trades (about 25 a year) and the best result measured: 91% / 88% winners and +0.07R / +0.05R per trade in 2010-2019 / 2020-2026 with Sniper, against 90% / 85% and +0.06R / +0.02R with all triggers. The same scanner setups without the filters and the limit entry lost money (profit factor about 0.7).")
 pbFrac      = input.float(0.33, "Pullback entry: limit at × stop distance · valid bars", minval = 0.05, maxval = 0.9, step = 0.01, group = G_LTF, inline = "pb", tooltip = "After a signal, a limit order is placed this fraction of the stop distance back toward the stop. Risk and targets are measured from the fill. Signals whose limit is not filled are marked ✗ and are not trades.")
 pbBars      = input.int(3, "", minval = 1, maxval = 20, group = G_LTF, inline = "pb")
@@ -481,14 +482,22 @@ bool sessOn = sessIn == "On" or (sessIn == "Auto" and assetClass != "crypto")
 bool sessApplies = sessOn and timeframe.isintraday and timeframe.in_seconds() < 14400
 bool inTradeSess = not sessApplies or inSessRaw
 
-bool baseL = (not useAnchor or anchorTrend == 1) and inTradeSess
-bool baseS = (not useAnchor or anchorTrend == -1) and inTradeSess
+// Trade frequency below 1H relaxes the filters step by step (see the input's tooltip for what each step cost).
+bool ltfChart = timeframe.isintraday and timeframe.in_seconds() < 3600
+bool fActive = ltfChart and ltfPack and str.startswith(freqMode, "Active")
+bool fDaily = ltfChart and ltfPack and str.startswith(freqMode, "Daily")
+bool anchorOn = useAnchor and not fActive
+bool htfGateOn = useHtfGate and not fActive
+int minScoreEff = fActive or fDaily ? 0 : minScore
+float minStopEff = fActive or fDaily ? math.min(minStopPct, 0.25) : minStopPct
+bool baseL = (not anchorOn or anchorTrend == 1) and (inTradeSess or fActive)
+bool baseS = (not anchorOn or anchorTrend == -1) and (inTradeSess or fActive)
 bool ltfOn = ltfPack and timeframe.isintraday and timeframe.in_seconds() < 3600
-bool usePullback = ltfOn
+bool usePullback = ltfOn and not fActive and not fDaily
 bool apexOk = not (precise and ltfOn)
 bool okBar = not ltfOn or (high - low) <= maxBarAtr * atr
-bool trendGateL = baseL and scoreL >= minScore and (not useHtfGate or htfTrend == 1) and okBar
-bool trendGateS = baseS and scoreS >= minScore and (not useHtfGate or htfTrend == -1) and okBar
+bool trendGateL = baseL and scoreL >= minScoreEff and (not htfGateOn or htfTrend == 1) and okBar
+bool trendGateS = baseS and scoreS >= minScoreEff and (not htfGateOn or htfTrend == -1) and okBar
 bool revGateL = baseL and htfTrend != -1
 bool revGateS = baseS and htfTrend != 1
 
@@ -534,8 +543,8 @@ bool cgOkL = not (smallGuard and smallTf) or slDistL >= cgMinDist
 bool cgOkS = not (smallGuard and smallTf) or slDistS >= cgMinDist
 
 bool warm = bar_index >= 250
-bool floorOkL = not ltfOn or slDistL >= minStopPct / 100 * close
-bool floorOkS = not ltfOn or slDistS >= minStopPct / 100 * close
+bool floorOkL = not ltfOn or slDistL >= minStopEff / 100 * close
+bool floorOkS = not ltfOn or slDistS >= minStopEff / 100 * close
 bool longSig  = barstate.isconfirmed and warm and rawL and ready and cgOkL and floorOkL
 bool shortSig = barstate.isconfirmed and warm and rawS and ready and cgOkS and floorOkS
 float chandL = ta.highest(high, chLen) - chMult * atr
