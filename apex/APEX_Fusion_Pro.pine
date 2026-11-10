@@ -79,6 +79,7 @@ reverseOn   = input.bool(true, "Opposite signal reverses an open trade", group =
 
 ltfPack     = input.bool(true, "Professional execution pack below 1H", group = G_LTF, tooltip = "On charts below 1H: enter with a limit order on a pullback instead of chasing the close, skip news/exhaustion candles and require a minimum volatility. In the gold tests this raised the 5m/15m win rate from ~55-67% to ~70-82%.")
 freqMode    = input.string("Active (about 4-6 trades a day)", "Trade frequency below 1H", options = ["Active (about 4-6 trades a day)", "Daily (about 1 trade a day)", "Precise (about 2 trades a month)"], group = G_LTF, tooltip = "Gold 5m, 16.8 years of 1-minute data, Sniper management, 2010-2019 / 2020-2026. Precise (all filters, stop at least 0.43% of price, limit entry): 91% / 88% winners, +0.07R / +0.05R per trade, profit factor 1.77 / 1.39. Daily (trend filters and session, stop at least 0.25%, market entry): 83% / 84% winners, -0.035R / -0.010R, profit factor 0.80 / 0.94. Active (no trend or session filter, stop at least 0.25%, market entry): 79% / 80% winners, -0.048R / -0.032R, profit factor 0.74 / 0.81. Every setting that traded once a day or more lost money in this test; only Precise was profitable.")
+maxPerDay   = input.int(5, "Maximum new trades per day (0 = no limit)", minval = 0, maxval = 50, group = G_LTF, tooltip = "Intraday charts only. After this many signals have been taken in one trading day, further signals are ignored until the next day. The limit lowers the number of trades; it was not part of the backtests and does not make a losing setting profitable. With the Active frequency the Auto profile uses High Win-Rate (0.5R / 2R / 5R) instead of Sniper: on 16.8 years of gold 5m data that lost less per unit of risk (profit factor 0.83 / 0.90 against 0.74 / 0.81) with about 60% winners instead of 80%.")
 precise     = input.bool(true, "Precision entries below 1H: scanner setups only", group = G_LTF, tooltip = "Below 1H the Donchian breakout, SuperTrend pullback and SuperTrend flip triggers are switched off and only the scanner setups (break & retest, opening range, EMA pullback, VWAP reclaim) can open a trade, still behind the trend filters, the volatility floor and the limit entry. On 16.8 years of gold 5m data this gave fewer trades (about 25 a year) and the best result measured: 91% / 88% winners and +0.07R / +0.05R per trade in 2010-2019 / 2020-2026 with Sniper, against 90% / 85% and +0.06R / +0.02R with all triggers. The same scanner setups without the filters and the limit entry lost money (profit factor about 0.7).")
 pbFrac      = input.float(0.33, "Pullback entry: limit at × stop distance · valid bars", minval = 0.05, maxval = 0.9, step = 0.01, group = G_LTF, inline = "pb", tooltip = "After a signal, a limit order is placed this fraction of the stop distance back toward the stop. Risk and targets are measured from the fill. Signals whose limit is not filled are marked ✗ and are not trades.")
 pbBars      = input.int(3, "", minval = 1, maxval = 20, group = G_LTF, inline = "pb")
@@ -509,7 +510,7 @@ bool rawS = setupS != "" and dirMode != "Long only" and not rawL
 
 // Management profile (an unknown choice, e.g. a renamed option kept by a saved layout, falls back to Auto)
 bool profKnown = profileIn == PROF_ULT or profileIn == PROF_SHD or profileIn == PROF_SNP or profileIn == PROF_MW or profileIn == PROF_HW or profileIn == PROF_BAL or profileIn == PROF_HP or profileIn == PROF_RUN or profileIn == PROF_CUS
-string profile = profKnown ? profileIn : (timeframe.in_seconds() >= 3600 ? PROF_HW : ltfPack ? PROF_SNP : PROF_BAL)
+string profile = profKnown ? profileIn : (timeframe.in_seconds() >= 3600 ? PROF_HW : ltfPack ? (fActive ? PROF_HW : PROF_SNP) : PROF_BAL)
 float k1 = profile == PROF_ULT ? 0.005 : profile == PROF_SHD ? 0.05 : profile == PROF_SNP ? 0.2 : profile == PROF_MW ? 0.4 : profile == PROF_BAL ? 1.0 : profile == PROF_HW ? 0.5 : profile == PROF_HP ? 0.3 : profile == PROF_RUN ? 1.0 : cTp1
 float k2 = profile == PROF_ULT ? 1.5 : profile == PROF_SHD ? 1.5 : profile == PROF_SNP ? 1.5 : profile == PROF_MW ? 1.5 : profile == PROF_BAL ? 3.0 : profile == PROF_HW ? 2.0 : profile == PROF_HP ? 1.5 : profile == PROF_RUN ? 2.0 : cTp2
 float k3 = profile == PROF_ULT ? 4.0 : profile == PROF_SHD ? 4.0 : profile == PROF_SNP ? 4.0 : profile == PROF_MW ? 4.0 : profile == PROF_BAL ? 5.0 : profile == PROF_HW ? 5.0 : profile == PROF_HP ? 4.0 : profile == PROF_RUN ? 8.0 : cTp3
@@ -545,8 +546,14 @@ bool cgOkS = not (smallGuard and smallTf) or slDistS >= cgMinDist
 bool warm = bar_index >= 250
 bool floorOkL = not ltfOn or slDistL >= minStopEff / 100 * close
 bool floorOkS = not ltfOn or slDistS >= minStopEff / 100 * close
-bool longSig  = barstate.isconfirmed and warm and rawL and ready and cgOkL and floorOkL
-bool shortSig = barstate.isconfirmed and warm and rawS and ready and cgOkS and floorOkS
+// Daily cap on new trades (intraday charts).
+var int dayTrades = 0
+bool capNewDay = timeframe.change("D")
+if capNewDay
+    dayTrades := 0
+bool capOk = maxPerDay == 0 or not timeframe.isintraday or dayTrades < maxPerDay
+bool longSig  = barstate.isconfirmed and warm and rawL and ready and cgOkL and floorOkL and capOk
+bool shortSig = barstate.isconfirmed and warm and rawS and ready and cgOkS and floorOkS and capOk
 float chandL = ta.highest(high, chLen) - chMult * atr
 float chandS = ta.lowest(low, chLen) + chMult * atr
 float chandL1 = chandL[1]
@@ -994,6 +1001,8 @@ else if shortSig and (na(cur) or (reverseOn and cur.dir == 1))
     else
         cur := openTradeAt(-1, setupS, scoreS, close, close + slDistS, bar_index, na)
     newShort := true
+if newLong or newShort
+    dayTrades += 1
 
 // ───────────────────────────── Live trade levels on the price-scale side ─────────────────────────────
 var array<label> liveLevelLabels = array.new<label>()
