@@ -37,7 +37,7 @@ const string G_STR  = "④ Channel, trendlines & zones"
 const string G_DASH = "⑤ Statistics & cost"
 const string G_SIZE = "⑥ Position sizing"
 
-const string PROF_AUTO = "Auto (crypto → Trend Runner, others → High-Probability)"
+const string PROF_AUTO = "Auto (below 1H → Sniper scalping · crypto → Trend Runner · others → High-Probability)"
 const string PROF_SHD = "Shield (0.05R/1.5R/4R + breakeven, daily charts)"
 const string PROF_SNP = "Sniper (0.15R/1.5R/4R + trail)"
 const string PROF_HP  = "High-Probability (0.3R/1.5R/4R + trail)"
@@ -244,7 +244,8 @@ float chandL  = ta.highest(high, chLen) - chMult * atr
 float chandS  = ta.lowest(low, chLen) + chMult * atr
 
 // Management profile
-string profile = profileIn == PROF_AUTO ? (isCrypto ? PROF_RUN : PROF_HP) : profileIn
+// Scalping charts (below 1H): quick first target, stop to breakeven, trail (Sniper).
+string profile = profileIn == PROF_AUTO ? (timeframe.in_seconds() < 3600 ? PROF_SNP : isCrypto ? PROF_RUN : PROF_HP) : profileIn
 float k1 = profile == PROF_SHD ? 0.05 : profile == PROF_SNP ? 0.15 : profile == PROF_HP ? 0.3 : profile == PROF_BAL ? 1.0 : profile == PROF_RUN ? 1.0 : cTp1
 float k2 = profile == PROF_SHD ? 1.5 : profile == PROF_SNP ? 1.5 : profile == PROF_HP ? 1.5 : profile == PROF_BAL ? 2.0 : profile == PROF_RUN ? 2.0 : cTp2
 float k3 = profile == PROF_SHD ? 4.0 : profile == PROF_SNP ? 4.0 : profile == PROF_HP ? 4.0 : profile == PROF_BAL ? 3.0 : profile == PROF_RUN ? 8.0 : cTp3
