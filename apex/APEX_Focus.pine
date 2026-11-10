@@ -88,7 +88,7 @@ showSig     = input.bool(true,  "Entry arrows", group = G_VIS)
 signalHistory = input.int(3, "Recent entry markers", minval = 1, maxval = 12, group = G_VIS)
 arrowGapAtr = input.float(0.75, "Arrow gap (ATR)", minval = 0.15, maxval = 5.0, step = 0.05, group = G_VIS, tooltip = "Gap from the signal candle low/high, measured in ATR price units, not screen pixels.")
 showLevels  = input.bool(true,  "Trade levels (entry / SL / TP)", group = G_VIS)
-showBoxes   = input.bool(false, "Active risk / reward zones", group = G_VIS)
+showBoxes   = input.bool(true, "Active risk / reward zones", group = G_VIS)
 showHits    = input.bool(false, "Recent TP / SL text (max 12)", group = G_VIS)
 showTrail   = input.bool(false, "Historical stop path", group = G_VIS)
 showSess    = input.bool(false, "Shade London / New York sessions (local exchange hours)", group = G_VIS)
@@ -104,7 +104,7 @@ pivLen      = input.int(10, "", minval = 2, maxval = 50, group = G_STR, inline =
 showZones   = input.bool(true, "Support / resistance zones · per side", group = G_STR, inline = "z")
 zoneCount   = input.int(3, "", minval = 1, maxval = 10, group = G_STR, inline = "z", tooltip = "Zones drawn per side, and also how many recent pivot-low supports the rebound watch (group ⑦) remembers, even when the zones are hidden.")
 
-showDash    = input.bool(true, "Statistics panel · position", group = G_DASH, inline = "dash", tooltip = "Results of the internal simulation over the bars loaded on this chart, after the cost below. They describe the past of this chart only.")
+showDash    = input.bool(false, "Statistics panel · position", group = G_DASH, inline = "dash", tooltip = "Results of the internal simulation over the bars loaded on this chart, after the cost below. They describe the past of this chart only.")
 dashPosIn   = input.string("Top right", "", options = ["Top right", "Top left", "Middle right", "Bottom right", "Bottom left"], group = G_DASH, inline = "dash")
 costMode    = input.string("Auto", "Round-trip cost · custom %", options = ["Auto", "Custom"], group = G_DASH, inline = "cost", tooltip = "Auto: 0.10% crypto, 0.06% when the ticker contains XAG / SILVER / XPT / PLATINUM / XCU / COPPER, 0.03% otherwise. The cost is subtracted from every trade's R and drives the small-frame guard. Use Custom with your broker's real spread + commission.")
 costCustom  = input.float(0.05, "", minval = 0, step = 0.01, group = G_DASH, inline = "cost")
@@ -411,12 +411,12 @@ openTrade(int d, string trig, int score) =>
     color c = d == 1 ? bullCol : bearCol
     if showLevels
         t.lnEntry := line.new(bar_index, e, bar_index + 1, e, color = color.new(c, 0), width = 2)
-        t.lnSl := line.new(bar_index, t.sl, bar_index + 1, t.sl, color = color.new(bearCol, 0), style = line.style_dashed, width = 1)
-        t.lnTp1 := line.new(bar_index, t.tp1, bar_index + 1, t.tp1, color = color.new(bullCol, 30), style = line.style_dotted)
-        t.lnTp2 := line.new(bar_index, tp2Edge, bar_index + 1, tp2Edge, color = color.new(bullCol, na(t.tp2) ? 100 : 20), style = line.style_dotted)
-        t.lnTp3 := line.new(bar_index, rewardEdge, bar_index + 1, rewardEdge, color = color.new(bullCol, na(t.tp3) ? 100 : 0), style = line.style_dotted, width = 2)
+        t.lnSl := line.new(bar_index, t.sl, bar_index + 1, t.sl, color = color.new(bearCol, 0), width = 2)
+        t.lnTp1 := line.new(bar_index, t.tp1, bar_index + 1, t.tp1, color = color.new(bullCol, 0), width = 1)
+        t.lnTp2 := line.new(bar_index, tp2Edge, bar_index + 1, tp2Edge, color = color.new(bullCol, na(t.tp2) ? 100 : 0), width = 1)
+        t.lnTp3 := line.new(bar_index, rewardEdge, bar_index + 1, rewardEdge, color = color.new(bullCol, na(t.tp3) ? 100 : 0), width = 2)
     if showBoxes
-        t.bxRisk := box.new(bar_index, math.max(e, t.sl), bar_index + 1, math.min(e, t.sl), border_color = color.new(bearCol, 100), bgcolor = color.new(bearCol, 88))
+        t.bxRisk := box.new(bar_index, math.max(e, t.sl), bar_index + 1, math.min(e, t.sl), border_color = color.new(bearCol, 100), bgcolor = color.new(bearCol, 85))
         t.bxReward := box.new(bar_index, math.max(e, rewardEdge), bar_index + 1, math.min(e, rewardEdge), border_color = color.new(bullCol, 100), bgcolor = color.new(bullCol, 90))
     if showSig
         float qty = acct * riskPct / 100 / (dist * syminfo.pointvalue)
@@ -596,10 +596,9 @@ addLevelLabel(array<label> labels, int x, float price, string txt, color bg, flo
             label existing = labels.get(i)
             if not merged and math.abs(label.get_y(existing) - price) <= tolerance
                 label.set_text(existing, label.get_text(existing) + "\n" + txt)
-                label.set_color(existing, color.new(neutCol, 80))
                 merged := true
     if not merged
-        labels.push(label.new(x, price, txt, style = label.style_label_left, color = color.new(bg, 80), textcolor = chart.fg_color, size = size.small))
+        labels.push(label.new(x, price, txt, style = label.style_label_left, color = color.new(bg, 10), textcolor = color.white, size = size.small))
     merged
 
 if barstate.islast
