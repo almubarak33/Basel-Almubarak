@@ -19,12 +19,12 @@ indicator("APEX Gold Scalper", shorttitle = "APEX GOLD", overlay = true, max_lab
 // ───────────────────────────── Inputs ─────────────────────────────
 const string G_ENT = "① Entries"
 const string G_VIS = "② Chart"
-const string F_PRE = "Precise (about 2 trades a month)"
-const string F_DAY = "Daily (about 1 trade a day)"
-const string F_ACT = "Active (about 4-6 trades a day)"
+const string F_PRE = "دقيق · Precise (≈ صفقتان بالشهر)"
+const string F_DAY = "يومي · Daily (≈ صفقة باليوم)"
+const string F_ACT = "نشط · Active (≈ 4-6 صفقات باليوم)"
 
 lang      = input.string("العربية", "Language / اللغة", options = ["العربية", "English"], group = G_ENT)
-freqMode  = input.string(F_PRE, "Trade frequency below 1H", options = [F_PRE, F_DAY, F_ACT], group = G_ENT, tooltip = "Gold 5m, 16.8 years of 1-minute data, 2010-2019 / 2020-2026. Precise: 91% / 88% winners, +0.07R / +0.05R per trade. Daily: 83% / 84% winners, -0.035R / -0.010R. Active: about 60% winners, -0.06R / -0.03R. Only Precise made money in that test.")
+freqMode  = input.string(F_PRE, "وتيرة الصفقات تحت الساعة · Trade frequency", options = [F_PRE, F_DAY, F_ACT], group = G_ENT, tooltip = "Gold 5m, 16.8 years of 1-minute data, 2010-2019 / 2020-2026. Precise: 91% / 88% winners, +0.07R / +0.05R per trade. Daily: 83% / 84% winners, -0.035R / -0.010R. Active: about 60% winners, -0.06R / -0.03R. Only Precise made money in that test.")
 dirMode   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT)
 keepTrades = input.int(4, "Keep last N closed trades on the chart", minval = 0, maxval = 20, group = G_VIS)
 showCloud = input.bool(true, "Trend cloud (EMA 21 / 55) and EMA 200", group = G_VIS)
@@ -499,6 +499,9 @@ if barstate.islast
         string arrow = trendDir == 1 ? "▲ " : trendDir == -1 ? "▼ " : "◆ "
         string word = trendDir == 1 ? tr("UPTREND", "المسار صاعد") : trendDir == -1 ? tr("DOWNTREND", "المسار هابط") : tr("SIDEWAYS", "المسار عرضي")
         string detail = anchorTf + (anchorTrend == 1 ? "▲" : anchorTrend == -1 ? "▼" : "◆") + "  " + htf + (htfTrend == 1 ? "▲" : htfTrend == -1 ? "▼" : "◆")
+        // Below 1H the tag also names the active frequency mode, so the setting in use is visible on the chart.
+        if ltf
+            detail += "\n" + (fActive ? tr("Mode: Active", "الوضع: نشط") : fDaily ? tr("Mode: Daily", "الوضع: يومي") : tr("Mode: Precise", "الوضع: دقيق"))
         trendTag := label.new(bar_index + 12, ema200, arrow + word + "\n" + detail, style = label.style_label_left, color = color.new(trendDir == 1 ? bullCol : trendDir == -1 ? bearCol : color.gray, 10), textcolor = color.white, size = size.normal)
 
 // ───────────────────────────── Support / resistance zones and trendlines ─────────────────────────────
