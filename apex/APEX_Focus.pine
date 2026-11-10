@@ -49,6 +49,7 @@ const string DIR_AUTO = "Auto (forex → both, others → long only)"
 
 // Only the first input of an inline row carries a title (TradingView's input alignment rule).
 lang        = input.string("العربية", "Language / اللغة", options = ["العربية", "English"], group = G_SIG)
+entryMode   = input.string("Scanner setups", "Entry engine", options = ["Scanner setups", "APEX triggers"], group = G_SIG, tooltip = "Scanner setups: entries come from the Setup Scanner models (break & retest, opening-range break, EMA 9/21 pullback, VWAP reclaim, liquidity sweep, RSI divergence) on their own, without the APEX confluence score or the momentum filter. APEX triggers: the original Donchian / SuperTrend / pullback triggers with the score and momentum filters. The backtests in the report were made with APEX triggers only; the scanner entries have not been measured in this script.")
 useBrk      = input.bool(true,  "Trigger: Donchian breakout · length", group = G_SIG, inline = "t1")
 donLen      = input.int(20, "", minval = 5, group = G_SIG, inline = "t1")
 useFlip     = input.bool(true,  "Trigger: SuperTrend flip · factor · ATR length", group = G_SIG, inline = "t2")
@@ -205,8 +206,8 @@ bool pbDn     = stDir > 0 and touchDn and close < low[1] and close < ema21 and c
 
 bool trigL = (useBrk and brkUp) or (useFlip and flipUp) or (usePb and pbUp)
 bool trigS = (useBrk and brkDn) or (useFlip and flipDn) or (usePb and pbDn)
-string trigNameL = useBrk and brkUp ? "BRK" : useFlip and flipUp ? "FLIP" : "PB"
-string trigNameS = useBrk and brkDn ? "BRK" : useFlip and flipDn ? "FLIP" : "PB"
+string apxNameL = useBrk and brkUp ? "BRK" : useFlip and flipUp ? "FLIP" : "PB"
+string apxNameS = useBrk and brkDn ? "BRK" : useFlip and flipDn ? "FLIP" : "PB"
 
 bool warm   = bar_index >= 250
 bool tsmL = not useTsm or tsm >= 1
@@ -231,9 +232,150 @@ float cgMinDist = costPct / 100 * close / (cgMaxPct / 100)
 bool cgOkL = not (smallGuard and smallTf) or slDistL >= cgMinDist
 bool cgOkS = not (smallGuard and smallTf) or slDistS >= cgMinDist
 
+// ───────────────────────────── Scanner setups (GBB models) ─────────────────────────────
+float gEma9 = ta.ema(close, 9)
+float gEma50 = ta.ema(close, 50)
+float gVolMa = ta.sma(volume, 20)
+bool gVolOk = na(volume) or na(gVolMa) or volume >= gVolMa
+bool gBull = close > open
+bool gBear = close < open
+// Session VWAP built by hand (works on symbols without volume: it stays na and the setup is silent).
+var float gCpv = 0.0
+var float gCv = 0.0
+if timeframe.change("D")
+    gCpv := 0.0
+    gCv := 0.0
+gCpv += hlc3 * nz(volume)
+gCv += nz(volume)
+float gVwap = gCv > 0 ? gCpv / gCv : na
+// EMA 9/21 pullback
+bool gUp = ema21 > gEma50 and gEma50 > gEma50[3]
+bool gDn = ema21 < gEma50 and gEma50 < gEma50[3]
+bool gTouchUp = ta.barssince(low <= ema21) <= 3
+bool gTouchDn = ta.barssince(high >= ema21) <= 3
+bool gEmaL = gUp and gTouchUp and close > gEma9 and gBull and close > high[1] and gVolOk
+bool gEmaS = gDn and gTouchDn and close < gEma9 and gBear and close < low[1] and gVolOk
+// VWAP reclaim after at least 6 closes on the other side
+var int gBelow = 0
+var int gAbove = 0
+bool gCrossUp = ta.crossover(close, gVwap)
+bool gCrossDn = ta.crossunder(close, gVwap)
+if not na(gVwap)
+    gBelow := close < gVwap ? gBelow + 1 : 0
+    gAbove := close > gVwap ? gAbove + 1 : 0
+bool gVwapL = not na(gVwap) and gCrossUp and nz(gBelow[1]) >= 6 and gVolOk
+bool gVwapS = not na(gVwap) and gCrossDn and nz(gAbove[1]) >= 6 and gVolOk
+// Liquidity sweep of the 20-bar extreme
+float gSwLo = ta.lowest(low, 20)[1]
+float gSwHi = ta.highest(high, 20)[1]
+bool gSweepL = not na(gSwLo) and low < gSwLo and close > gSwLo and gBull and (close - low) > (high - close) and gVolOk
+bool gSweepS = not na(gSwHi) and high > gSwHi and close < gSwHi and gBear and (high - close) > (close - low) and gVolOk
+// Break and retest of a confirmed swing (pivot 5 / 5, retest within 20 bars, tolerance 0.3 ATR)
+float gPh = ta.pivothigh(high, 5, 5)
+float gPl = ta.pivotlow(low, 5, 5)
+var float gHiLvl = na
+var bool  gHiBrk = false
+var int   gHiBar = na
+var float gHiPend = na
+var float gLoLvl = na
+var bool  gLoBrk = false
+var int   gLoBar = na
+var float gLoPend = na
+gBusy(bool brk, int brkBar) =>
+    brk and not na(brkBar) and bar_index - brkBar <= 20
+if not na(gPh)
+    if gBusy(gHiBrk, gHiBar)
+        gHiPend := gPh
+    else
+        gHiLvl := gPh
+        gHiBrk := false
+        gHiPend := na
+if not na(gPl)
+    if gBusy(gLoBrk, gLoBar)
+        gLoPend := gPl
+    else
+        gLoLvl := gPl
+        gLoBrk := false
+        gLoPend := na
+if not na(gHiLvl) and not gHiBrk and close > gHiLvl
+    gHiBrk := true
+    gHiBar := bar_index
+if not na(gLoLvl) and not gLoBrk and close < gLoLvl
+    gLoBrk := true
+    gLoBar := bar_index
+bool gBrtL = gBusy(gHiBrk, gHiBar) and bar_index > gHiBar and atr > 0 and low <= gHiLvl + atr * 0.3 and close > gHiLvl and gBull
+bool gBrtS = gBusy(gLoBrk, gLoBar) and bar_index > gLoBar and atr > 0 and high >= gLoLvl - atr * 0.3 and close < gLoLvl and gBear
+if gBrtL
+    gHiBrk := false
+if gBrtS
+    gLoBrk := false
+if not gBusy(gHiBrk, gHiBar) and not na(gHiPend)
+    gHiLvl := gHiPend
+    gHiBrk := false
+    gHiPend := na
+if not gBusy(gLoBrk, gLoBar) and not na(gLoPend)
+    gLoLvl := gLoPend
+    gLoBrk := false
+    gLoPend := na
+// RSI divergence between two confirmed pivots at most 60 bars apart
+var float gLastPlP = na
+var float gLastPlR = na
+var int   gLastPlB = na
+var float gLastPhP = na
+var float gLastPhR = na
+var int   gLastPhB = na
+bool gDivL = false
+bool gDivS = false
+float gRsiPiv = rsi14[5]
+if not na(gPl)
+    if not na(gLastPlP) and bar_index - gLastPlB <= 60
+        gDivL := gPl < gLastPlP and gRsiPiv > gLastPlR
+    gLastPlP := gPl
+    gLastPlR := gRsiPiv
+    gLastPlB := bar_index
+if not na(gPh)
+    if not na(gLastPhP) and bar_index - gLastPhB <= 60
+        gDivS := gPh > gLastPhP and gRsiPiv < gLastPhR
+    gLastPhP := gPh
+    gLastPhR := gRsiPiv
+    gLastPhB := bar_index
+// Opening-range break: first 15 minutes of 09:30-16:00 New York (crypto: 00:00 UTC), one break per session
+bool gInOr = not na(time(timeframe.period, isCrypto ? "0000-2300" : "0930-1600", isCrypto ? "UTC" : "America/New_York"))
+bool gNewOr = gInOr and not gInOr[1]
+var float gOrH = na
+var float gOrL = na
+var bool  gOrDone = false
+var bool  gOrFired = false
+var int   gOrStart = na
+if gNewOr
+    gOrH := high
+    gOrL := low
+    gOrDone := false
+    gOrFired := false
+    gOrStart := time
+else if gInOr and not gOrDone
+    if not na(gOrStart) and (time - gOrStart) >= 15 * 60000
+        gOrDone := true
+    else
+        gOrH := math.max(nz(gOrH, high), high)
+        gOrL := math.min(nz(gOrL, low), low)
+bool gOrbL = timeframe.isintraday and gInOr and gOrDone and not gOrFired and not na(gOrH) and close > gOrH
+bool gOrbS = timeframe.isintraday and gInOr and gOrDone and not gOrFired and not na(gOrL) and close < gOrL
+if barstate.isconfirmed and (gOrbL or gOrbS)
+    gOrFired := true
+
+bool scanMode = entryMode == "Scanner setups"
+bool scanL = gBrtL or gOrbL or gEmaL or gVwapL or gSweepL or gDivL
+bool scanS = (gBrtS or gOrbS or gEmaS or gVwapS or gSweepS or gDivS) and not scanL
+string trigNameL = scanMode ? (gBrtL ? "B&R" : gOrbL ? "ORB" : gEmaL ? "EMA" : gVwapL ? "VWAP" : gSweepL ? "SWEEP" : "DIV") : apxNameL
+string trigNameS = scanMode ? (gBrtS ? "B&R" : gOrbS ? "ORB" : gEmaS ? "EMA" : gVwapS ? "VWAP" : gSweepS ? "SWEEP" : "DIV") : apxNameS
+// Scanner mode: the setup alone decides. APEX mode: trigger + confluence score + momentum filter.
+bool entryL = scanMode ? scanL : trigL and scoreL >= minScore and tsmL
+bool entryS = scanMode ? scanS : trigS and scoreS >= minScore and tsmS
+
 // slDist > 0 is false while the stop distance is still na (a swing lookback longer than the loaded history).
-bool rawLong  = barstate.isconfirmed and warm and trigL and scoreL >= minScore and tsmL and allowLong and atr > 0 and slDistL > 0
-bool rawShort = barstate.isconfirmed and warm and trigS and scoreS >= minScore and tsmS and allowShort and atr > 0 and slDistS > 0
+bool rawLong  = barstate.isconfirmed and warm and entryL and allowLong and atr > 0 and slDistL > 0
+bool rawShort = barstate.isconfirmed and warm and entryS and allowShort and atr > 0 and slDistS > 0
 bool longSig  = rawLong and cgOkL
 bool shortSig = rawShort and cgOkS
 // Signals the cost guard removed (shown in the statistics panel so a silent chart is explained).
