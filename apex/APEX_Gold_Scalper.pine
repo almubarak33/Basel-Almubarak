@@ -1,0 +1,552 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// APEX Gold Scalper — a clean scalping chart for gold (XAUUSD).
+// What it draws: the trend (EMA cloud + one trend tag), support / resistance zones, two pivot trendlines,
+// and each trade as an entry line, a risk zone, a reward zone and price tags for the stop and three targets.
+// No table.
+// Entries (bar close only, no repainting): break & retest, opening-range break, EMA 9/21 pullback and VWAP
+// reclaim, taken with the Daily and 4H trend and during the New York day (08:00-17:00). Below 1H the default
+// "Precise" mode also asks for a confluence score of 5/7, a minimum stop of 0.43% of price and enters with a
+// limit order on a pullback (33% of the stop distance, valid 3 bars).
+// Measured on 16.8 years of 1-minute gold data with this logic (see apex/REPORT_METALS.md and the chat notes):
+//   Precise, 5m: about 2 trades a month, 91% / 88% winners, +0.07R / +0.05R per trade (2010-2019 / 2020-2026).
+//   Daily,   5m: about 1 trade a day,   83% / 84% winners, -0.035R / -0.010R per trade.
+//   Active,  5m: about 4-6 trades a day, 60% winners, -0.06R / -0.03R per trade.
+// Only Precise was profitable in that test. A high win rate here comes from a small first target (0.2R): one
+// full stop costs about five average wins.
+//@version=6
+indicator("APEX Gold Scalper", shorttitle = "APEX GOLD", overlay = true, max_labels_count = 300, max_lines_count = 300, max_boxes_count = 200, max_bars_back = 500)
+
+// ───────────────────────────── Inputs ─────────────────────────────
+const string G_ENT = "① Entries"
+const string G_VIS = "② Chart"
+const string F_PRE = "Precise (about 2 trades a month)"
+const string F_DAY = "Daily (about 1 trade a day)"
+const string F_ACT = "Active (about 4-6 trades a day)"
+
+lang      = input.string("العربية", "Language / اللغة", options = ["العربية", "English"], group = G_ENT)
+freqMode  = input.string(F_PRE, "Trade frequency below 1H", options = [F_PRE, F_DAY, F_ACT], group = G_ENT, tooltip = "Gold 5m, 16.8 years of 1-minute data, 2010-2019 / 2020-2026. Precise: 91% / 88% winners, +0.07R / +0.05R per trade. Daily: 83% / 84% winners, -0.035R / -0.010R. Active: about 60% winners, -0.06R / -0.03R. Only Precise made money in that test.")
+dirMode   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT)
+keepTrades = input.int(4, "Keep last N closed trades on the chart", minval = 0, maxval = 20, group = G_VIS)
+showCloud = input.bool(true, "Trend cloud (EMA 21 / 55) and EMA 200", group = G_VIS)
+showTrend = input.bool(true, "Trend tag", group = G_VIS)
+showZones = input.bool(true, "Support / resistance zones · per side", group = G_VIS, inline = "z")
+zoneCount = input.int(3, "", minval = 1, maxval = 8, group = G_VIS, inline = "z")
+showTl    = input.bool(true, "Trendlines · pivot strength", group = G_VIS, inline = "tl")
+pivLen    = input.int(10, "", minval = 3, maxval = 50, group = G_VIS, inline = "tl")
+bullCol   = input.color(#22ab94, "Colors: up · down · entry", group = G_VIS, inline = "c")
+bearCol   = input.color(#f23645, "", group = G_VIS, inline = "c")
+entryCol  = input.color(#2196f3, "", group = G_VIS, inline = "c")
+
+isAr = lang == "العربية"
+tr(string en, string ar) => isAr ? ar : en
+fmt(float v) => str.tostring(v, format.mintick)
+
+if barstate.isfirst and not chart.is_standard
+    runtime.error("APEX Gold Scalper needs a standard candle chart (not Heikin Ashi / Renko).")
+
+// ───────────────────────────── Higher-timeframe trend ─────────────────────────────
+// +1 when close > EMA and SuperTrend up, -1 when both down. The previous completed bar is read (no repaint).
+htfTrendCalc(int emaLen) =>
+    [_, d] = ta.supertrend(3.0, 10)
+    e = ta.ema(close, emaLen)
+    na(e) or na(d) ? 0 : close > e and d < 0 ? 1 : close < e and d > 0 ? -1 : 0
+
+int tfSec = timeframe.in_seconds()
+string htfRaw = tfSec <= 3600 ? "240" : tfSec <= 14400 ? "D" : tfSec <= 86400 ? "W" : "M"
+string htf = timeframe.in_seconds(htfRaw) < tfSec ? timeframe.period : htfRaw
+string ancRaw = tfSec <= 3600 ? "D" : tfSec <= 14400 ? "W" : "M"
+string anchorTf = timeframe.in_seconds(ancRaw) < tfSec ? timeframe.period : ancRaw
+bool htfUse21 = timeframe.in_seconds(htf) >= timeframe.in_seconds("D")
+int htfTrend50 = request.security(syminfo.tickerid, htf, htfTrendCalc(50)[1], lookahead = barmerge.lookahead_on)
+int htfTrend21 = request.security(syminfo.tickerid, htf, htfTrendCalc(21)[1], lookahead = barmerge.lookahead_on)
+int htfTrend = nz(htfUse21 ? htfTrend21 : htfTrend50)
+int anchorTrend = nz(request.security(syminfo.tickerid, anchorTf, htfTrendCalc(21)[1], lookahead = barmerge.lookahead_on))
+
+// ───────────────────────────── Core series ─────────────────────────────
+atr    = ta.atr(14)
+ema9   = ta.ema(close, 9)
+ema21  = ta.ema(close, 21)
+ema50  = ta.ema(close, 50)
+ema55  = ta.ema(close, 55)
+ema200 = ta.ema(close, 200)
+[stLine, stDir] = ta.supertrend(3.0, 10)
+[diP, diM, adx] = ta.dmi(14, 14)
+rsi14  = ta.rsi(close, 14)
+float volMa = ta.sma(volume, 20)
+bool volOk = na(volume) or na(volMa) or volume >= volMa
+bool bullBar = close > open
+bool bearBar = close < open
+bool ready = not na(atr) and atr > 0
+// Session VWAP built by hand (stays na on feeds without volume; the VWAP setup is then silent)
+var float vwCpv = 0.0
+var float vwCv = 0.0
+if timeframe.change("D")
+    vwCpv := 0.0
+    vwCv := 0.0
+vwCpv += hlc3 * nz(volume)
+vwCv += nz(volume)
+float vwapV = vwCv > 0 ? vwCpv / vwCv : na
+
+scoreOf(int d) =>
+    int s = 0
+    s += htfTrend == d ? 1 : 0
+    s += (close - ema200) * d > 0 ? 1 : 0
+    s += (ema21 - ema55) * d > 0 ? 1 : 0
+    s += adx > 25 ? 1 : 0
+    s += adx > adx[3] and adx > 18 ? 1 : 0
+    s += (diP - diM) * d > 0 ? 1 : 0
+    s += (rsi14 - 50) * d > 0 ? 1 : 0
+    s
+int scoreL = scoreOf(1)
+int scoreS = scoreOf(-1)
+
+// ───────────────────────────── Setups ─────────────────────────────
+// EMA 9/21 pullback
+bool trendUpG = ema21 > ema50 and ema50 > ema50[3]
+bool trendDnG = ema21 < ema50 and ema50 < ema50[3]
+bool touchedUpG = ta.barssince(low <= ema21) <= 3
+bool touchedDnG = ta.barssince(high >= ema21) <= 3
+bool sEmaL = trendUpG and touchedUpG and close > ema9 and bullBar and close > high[1] and volOk
+bool sEmaS = trendDnG and touchedDnG and close < ema9 and bearBar and close < low[1] and volOk
+// VWAP reclaim after at least 6 closes on the other side
+var int belowRun = 0
+var int aboveRun = 0
+bool vwapCrossUp = ta.crossover(close, vwapV)
+bool vwapCrossDn = ta.crossunder(close, vwapV)
+if not na(vwapV)
+    belowRun := close < vwapV ? belowRun + 1 : 0
+    aboveRun := close > vwapV ? aboveRun + 1 : 0
+bool sVwapL = not na(vwapV) and vwapCrossUp and nz(belowRun[1]) >= 6 and volOk
+bool sVwapS = not na(vwapV) and vwapCrossDn and nz(aboveRun[1]) >= 6 and volOk
+// Break and retest of a confirmed swing (pivot 5 / 5, retest within 20 bars, tolerance 0.3 ATR)
+float phV = ta.pivothigh(high, 5, 5)
+float plV = ta.pivotlow(low, 5, 5)
+var float brtHiLvl = na
+var bool  brtHiBrk = false
+var int   brtHiBar = na
+var float brtHiPend = na
+var float brtLoLvl = na
+var bool  brtLoBrk = false
+var int   brtLoBar = na
+var float brtLoPend = na
+brtBusy(bool brk, int brkBar) =>
+    brk and not na(brkBar) and bar_index - brkBar <= 20
+if not na(phV)
+    if brtBusy(brtHiBrk, brtHiBar)
+        brtHiPend := phV
+    else
+        brtHiLvl := phV
+        brtHiBrk := false
+        brtHiPend := na
+if not na(plV)
+    if brtBusy(brtLoBrk, brtLoBar)
+        brtLoPend := plV
+    else
+        brtLoLvl := plV
+        brtLoBrk := false
+        brtLoPend := na
+if not na(brtHiLvl) and not brtHiBrk and close > brtHiLvl
+    brtHiBrk := true
+    brtHiBar := bar_index
+if not na(brtLoLvl) and not brtLoBrk and close < brtLoLvl
+    brtLoBrk := true
+    brtLoBar := bar_index
+bool sBrtL = brtBusy(brtHiBrk, brtHiBar) and bar_index > brtHiBar and ready and low <= brtHiLvl + atr * 0.3 and close > brtHiLvl and bullBar
+bool sBrtS = brtBusy(brtLoBrk, brtLoBar) and bar_index > brtLoBar and ready and high >= brtLoLvl - atr * 0.3 and close < brtLoLvl and bearBar
+if sBrtL
+    brtHiBrk := false
+if sBrtS
+    brtLoBrk := false
+if not brtBusy(brtHiBrk, brtHiBar) and not na(brtHiPend)
+    brtHiLvl := brtHiPend
+    brtHiBrk := false
+    brtHiPend := na
+if not brtBusy(brtLoBrk, brtLoBar) and not na(brtLoPend)
+    brtLoLvl := brtLoPend
+    brtLoBrk := false
+    brtLoPend := na
+// Opening-range break: first 15 minutes of 09:30-16:00 New York, one break per session
+bool inOrSess = not na(time(timeframe.period, "0930-1600", "America/New_York"))
+bool newOrSess = inOrSess and not inOrSess[1]
+var float orH = na
+var float orL = na
+var bool  orDone = false
+var bool  orFired = false
+var int   orStart = na
+if newOrSess
+    orH := high
+    orL := low
+    orDone := false
+    orFired := false
+    orStart := time
+else if inOrSess and not orDone
+    if not na(orStart) and (time - orStart) >= 15 * 60000
+        orDone := true
+    else
+        orH := math.max(nz(orH, high), high)
+        orL := math.min(nz(orL, low), low)
+bool sOrbL = inOrSess and orDone and not orFired and not na(orH) and close > orH
+bool sOrbS = inOrSess and orDone and not orFired and not na(orL) and close < orL
+if barstate.isconfirmed and (sOrbL or sOrbS)
+    orFired := true
+// 1H and above only: Donchian breakout, SuperTrend flip, SuperTrend pullback resume
+float donHi = ta.highest(high, 20)[1]
+float donLo = ta.lowest(low, 20)[1]
+bool sBrkL = close > donHi and close[1] <= donHi[1]
+bool sBrkS = close < donLo and close[1] >= donLo[1]
+bool sFlipL = stDir < 0 and stDir[1] > 0
+bool sFlipS = stDir > 0 and stDir[1] < 0
+bool touchUp = ta.lowest(low - ema21, 5) <= 0
+bool touchDn = ta.highest(high - ema21, 5) >= 0
+bool sPbL = stDir < 0 and touchUp and close > high[1] and close > ema21 and bullBar
+bool sPbS = stDir > 0 and touchDn and close < low[1] and close < ema21 and bearBar
+
+// ───────────────────────────── Filters ─────────────────────────────
+bool ltf = timeframe.isintraday and tfSec < 3600
+bool fActive = ltf and freqMode == F_ACT
+bool fDaily = ltf and freqMode == F_DAY
+bool inSess = not na(time(timeframe.period, "0800-1700", "America/New_York"))
+bool sessApplies = timeframe.isintraday and tfSec < 14400 and not fActive
+bool sessOk = not sessApplies or inSess
+int minScoreEff = fActive or fDaily ? 0 : 5
+bool usePullback = ltf and not fActive and not fDaily
+bool okBar = not ltf or (high - low) <= 2.5 * atr
+bool gateL = sessOk and (fActive or (anchorTrend == 1 and htfTrend == 1)) and scoreL >= minScoreEff and okBar
+bool gateS = sessOk and (fActive or (anchorTrend == -1 and htfTrend == -1)) and scoreS >= minScoreEff and okBar
+bool apexOk = not ltf
+string setupL = not ready or not gateL ? "" : sBrtL ? "B&R" : sOrbL ? "ORB" : apexOk and sBrkL ? "BRK" : sEmaL ? "EMA" : apexOk and sPbL ? "PB" : apexOk and sFlipL ? "FLIP" : sVwapL ? "VWAP" : ""
+string setupS = not ready or not gateS ? "" : sBrtS ? "B&R" : sOrbS ? "ORB" : apexOk and sBrkS ? "BRK" : sEmaS ? "EMA" : apexOk and sPbS ? "PB" : apexOk and sFlipS ? "FLIP" : sVwapS ? "VWAP" : ""
+bool rawL = setupL != "" and dirMode != "Short only"
+bool rawS = setupS != "" and dirMode != "Long only" and not rawL
+
+// Stop: last 10-bar swing beyond a 0.25 ATR buffer, clamped to 0.8-3.5 ATR
+float slDistL = math.min(math.max(close - (ta.lowest(low, 10) - 0.25 * atr), 0.8 * atr), 3.5 * atr)
+float slDistS = math.min(math.max((ta.highest(high, 10) + 0.25 * atr) - close, 0.8 * atr), 3.5 * atr)
+// Volatility floor below 1H: the stop must be a minimum share of price (quiet markets are skipped)
+float minStopPct = not ltf ? 0.0 : fActive or fDaily ? 0.25 : 0.43
+bool floorOkL = slDistL >= minStopPct / 100 * close
+bool floorOkS = slDistS >= minStopPct / 100 * close
+bool warm = bar_index >= 250
+bool longSig  = barstate.isconfirmed and warm and rawL and floorOkL
+bool shortSig = barstate.isconfirmed and warm and rawS and floorOkS
+
+// Targets in R: scalping (Sniper) below 1H except the Active mode; High Win-Rate otherwise
+bool sniper = ltf and not fActive
+float k1 = sniper ? 0.2 : 0.5
+float k2 = sniper ? 1.5 : 2.0
+float k3 = sniper ? 4.0 : 5.0
+
+// ───────────────────────────── Trade drawing and state ─────────────────────────────
+type Trade
+    int    dir
+    int    entryBar
+    string setup
+    float  entry
+    float  sl
+    float  sl0
+    float  tp1
+    float  tp2
+    float  tp3
+    bool   hit1 = false
+    bool   hit2 = false
+    box    bxRisk
+    box    bxReward
+    line   lnEntry
+    line   lnSl
+    line   lnTp1
+    line   lnTp2
+    line   lnTp3
+    label  lbSig
+    label  lbSl
+    label  lbTp1
+    label  lbTp2
+    label  lbTp3
+
+var Trade cur = na
+var array<Trade> closedTrades = array.new<Trade>()
+
+tagNew(int x, float y, string txt, color bg) =>
+    label.new(x, y, txt, style = label.style_label_left, color = color.new(bg, 10), textcolor = color.white, size = size.small)
+
+deleteTrade(Trade t) =>
+    box.delete(t.bxRisk)
+    box.delete(t.bxReward)
+    line.delete(t.lnEntry)
+    line.delete(t.lnSl)
+    line.delete(t.lnTp1)
+    line.delete(t.lnTp2)
+    line.delete(t.lnTp3)
+    label.delete(t.lbSig)
+    label.delete(t.lbSl)
+    label.delete(t.lbTp1)
+    label.delete(t.lbTp2)
+    label.delete(t.lbTp3)
+
+extendTrade(Trade t, int x) =>
+    t.bxRisk.set_right(x)
+    t.bxReward.set_right(x)
+    t.lnEntry.set_x2(x)
+    t.lnSl.set_x2(x)
+    t.lnTp1.set_x2(x)
+    t.lnTp2.set_x2(x)
+    t.lnTp3.set_x2(x)
+    t.lbSl.set_x(x)
+    t.lbTp1.set_x(x)
+    t.lbTp2.set_x(x)
+    t.lbTp3.set_x(x)
+
+openTrade(int d, string setup, float e, float stopPx, int x0, label lbIn) =>
+    float dist = (e - stopPx) * d
+    Trade t = Trade.new(d, bar_index, setup, e, stopPx, stopPx, e + d * k1 * dist, e + d * k2 * dist, e + d * k3 * dist)
+    int xr = bar_index + 6
+    t.bxRisk := box.new(x0, math.max(e, stopPx), xr, math.min(e, stopPx), border_color = color.new(bearCol, 100), bgcolor = color.new(bearCol, 85))
+    t.bxReward := box.new(x0, math.max(e, t.tp2), xr, math.min(e, t.tp2), border_color = color.new(bullCol, 100), bgcolor = color.new(bullCol, 88))
+    t.lnEntry := line.new(x0, e, xr, e, color = entryCol, width = 2)
+    t.lnSl := line.new(x0, stopPx, xr, stopPx, color = bearCol, width = 2)
+    t.lnTp1 := line.new(x0, t.tp1, xr, t.tp1, color = bullCol, width = 1)
+    t.lnTp2 := line.new(x0, t.tp2, xr, t.tp2, color = bullCol, width = 1)
+    t.lnTp3 := line.new(x0, t.tp3, xr, t.tp3, color = bullCol, width = 1, style = line.style_dashed)
+    t.lbSl := tagNew(xr, stopPx, "SL " + fmt(stopPx), bearCol)
+    t.lbTp1 := tagNew(xr, t.tp1, "TP1 " + fmt(t.tp1), bullCol)
+    t.lbTp2 := tagNew(xr, t.tp2, "TP2 " + fmt(t.tp2), bullCol)
+    t.lbTp3 := tagNew(xr, t.tp3, "TP3 " + fmt(t.tp3), bullCol)
+    if na(lbIn)
+        t.lbSig := label.new(bar_index, stopPx, (d == 1 ? "BUY" : "SELL") + " · " + setup, style = d == 1 ? label.style_label_up : label.style_label_down, color = d == 1 ? bullCol : bearCol, textcolor = color.white, size = size.small, tooltip = tr("Entry ", "الدخول ") + fmt(e) + "\n" + tr("Stop ", "الوقف ") + fmt(stopPx))
+    else
+        t.lbSig := lbIn
+        lbIn.set_text((d == 1 ? "BUY" : "SELL") + " · " + setup)
+        lbIn.set_tooltip(tr("Filled at ", "نُفّذ عند ") + fmt(e))
+    t
+
+// reason: "SL" full stop, "BE" stop at entry / locked profit, "TP" final target, "REV" opposite signal
+finishTrade(Trade t, string reason) =>
+    extendTrade(t, bar_index)
+    if reason == "SL"
+        t.lbSl.set_text("❌ SL " + fmt(t.sl0))
+    else if reason == "BE"
+        t.lbSl.set_text(tr("EXIT ", "خروج ") + fmt(t.sl))
+        t.lbSl.set_y(t.sl)
+        t.lbSl.set_color(color.new(color.gray, 10))
+    else if reason == "REV"
+        t.lbSl.set_text(tr("EXIT (reverse)", "خروج (انعكاس)"))
+        t.lbSl.set_y(close)
+        t.lbSl.set_color(color.new(color.gray, 10))
+    closedTrades.push(t)
+    while closedTrades.size() > keepTrades
+        deleteTrade(closedTrades.shift())
+
+hitTp1(Trade t) =>
+    t.hit1 := true
+    t.sl := t.entry
+    t.lbTp1.set_text("✅ TP1 " + fmt(t.tp1))
+    t.lnSl.set_y1(t.entry)
+    t.lnSl.set_y2(t.entry)
+hitTp2(Trade t) =>
+    t.hit2 := true
+    t.sl := t.tp1
+    t.lbTp2.set_text("✅ TP2 " + fmt(t.tp2))
+    t.lnSl.set_y1(t.tp1)
+    t.lnSl.set_y2(t.tp1)
+
+// Pending pullback limit order (Precise mode below 1H)
+type Pending
+    int    dir
+    int    bar
+    float  limit
+    float  stop
+    string setup
+    label  lb
+    line   ln
+var Pending pend = na
+cancelPending(Pending p) =>
+    line.delete(p.ln)
+    label.delete(p.lb)
+
+// ───────────────────────────── 1) Manage the open trade (bars after the entry bar) ─────────────────────────────
+bool evTp1 = false
+bool evTp2 = false
+bool evTp3 = false
+bool evSl = false
+bool evExit = false
+if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
+    int d = cur.dir
+    if d == 1 ? open <= cur.sl : open >= cur.sl
+        evSl := cur.sl == cur.sl0
+        evExit := cur.sl != cur.sl0
+        finishTrade(cur, cur.sl == cur.sl0 ? "SL" : "BE")
+        cur := na
+    else
+        if not cur.hit1 and (d == 1 ? open >= cur.tp1 : open <= cur.tp1)
+            hitTp1(cur)
+            evTp1 := true
+        if cur.hit1 and not cur.hit2 and (d == 1 ? open >= cur.tp2 : open <= cur.tp2)
+            hitTp2(cur)
+            evTp2 := true
+        if cur.hit2 and (d == 1 ? open >= cur.tp3 : open <= cur.tp3)
+            cur.lbTp3.set_text("✅ TP3 " + fmt(cur.tp3))
+            evTp3 := true
+            finishTrade(cur, "TP")
+            cur := na
+        if not na(cur)
+            if d == 1 ? low <= cur.sl : high >= cur.sl
+                evSl := cur.sl == cur.sl0
+                evExit := cur.sl != cur.sl0
+                finishTrade(cur, cur.sl == cur.sl0 ? "SL" : "BE")
+                cur := na
+            else
+                if not cur.hit1 and (d == 1 ? high >= cur.tp1 : low <= cur.tp1)
+                    hitTp1(cur)
+                    evTp1 := true
+                if cur.hit1 and not cur.hit2 and (d == 1 ? high >= cur.tp2 : low <= cur.tp2)
+                    hitTp2(cur)
+                    evTp2 := true
+                if cur.hit2 and (d == 1 ? high >= cur.tp3 : low <= cur.tp3)
+                    cur.lbTp3.set_text("✅ TP3 " + fmt(cur.tp3))
+                    evTp3 := true
+                    finishTrade(cur, "TP")
+                    cur := na
+                // A stop raised by a fill on this bar is hit when the bar closes through it.
+                if not na(cur) and (d == 1 ? close <= cur.sl : close >= cur.sl)
+                    evExit := true
+                    finishTrade(cur, "BE")
+                    cur := na
+    if not na(cur)
+        extendTrade(cur, bar_index + 6)
+
+// ───────────────────────────── 1b) Pending limit order: fill, expire or cancel ─────────────────────────────
+bool evFill = false
+bool evCancel = false
+if barstate.isconfirmed and not na(pend)
+    if not na(cur)
+        cancelPending(pend)
+        evCancel := true
+        pend := na
+    else if bar_index > pend.bar
+        int pdir = pend.dir
+        bool expired = bar_index - pend.bar > 3
+        bool invalid = pdir == 1 ? open <= pend.stop : open >= pend.stop
+        if expired or invalid
+            cancelPending(pend)
+            evCancel := true
+            pend := na
+        else if (pdir == 1 ? low <= pend.limit : high >= pend.limit)
+            float fill = pdir == 1 ? math.min(open, pend.limit) : math.max(open, pend.limit)
+            if (fill - pend.stop) * pdir > 0
+                line.delete(pend.ln)
+                cur := openTrade(pdir, pend.setup, fill, pend.stop, pend.bar, pend.lb)
+                evFill := true
+                // Unknown order inside the fill bar: if it also reached the stop, count the stop.
+                if (pdir == 1 ? low <= cur.sl : high >= cur.sl)
+                    evSl := true
+                    finishTrade(cur, "SL")
+                    cur := na
+            else
+                cancelPending(pend)
+                evCancel := true
+            pend := na
+
+// ───────────────────────────── 2) New signals on bar close ─────────────────────────────
+bool newLong = false
+bool newShort = false
+if longSig and (na(cur) or cur.dir == -1)
+    if not na(cur)
+        evExit := true
+        finishTrade(cur, "REV")
+        cur := na
+    if usePullback
+        if not na(pend)
+            cancelPending(pend)
+            evCancel := true
+        float lim = close - 0.33 * slDistL
+        float stp = close - slDistL
+        label lb = label.new(bar_index, stp, "BUY LIMIT " + fmt(lim), style = label.style_label_up, color = color.new(bullCol, 30), textcolor = color.white, size = size.small, tooltip = tr("Limit entry, valid 3 bars. Setup: ", "أمر دخول محدد صالح 3 شموع. النموذج: ") + setupL)
+        line ln = line.new(bar_index, lim, bar_index + 3, lim, color = entryCol, style = line.style_dashed, width = 1)
+        pend := Pending.new(1, bar_index, lim, stp, setupL, lb, ln)
+    else
+        cur := openTrade(1, setupL, close, close - slDistL, bar_index, na)
+    newLong := true
+else if shortSig and (na(cur) or cur.dir == 1)
+    if not na(cur)
+        evExit := true
+        finishTrade(cur, "REV")
+        cur := na
+    if usePullback
+        if not na(pend)
+            cancelPending(pend)
+            evCancel := true
+        float lim = close + 0.33 * slDistS
+        float stp = close + slDistS
+        label lb = label.new(bar_index, stp, "SELL LIMIT " + fmt(lim), style = label.style_label_down, color = color.new(bearCol, 30), textcolor = color.white, size = size.small, tooltip = tr("Limit entry, valid 3 bars. Setup: ", "أمر دخول محدد صالح 3 شموع. النموذج: ") + setupS)
+        line ln = line.new(bar_index, lim, bar_index + 3, lim, color = entryCol, style = line.style_dashed, width = 1)
+        pend := Pending.new(-1, bar_index, lim, stp, setupS, lb, ln)
+    else
+        cur := openTrade(-1, setupS, close, close + slDistS, bar_index, na)
+    newShort := true
+
+// ───────────────────────────── Trend: cloud and one tag ─────────────────────────────
+color emaCol = ema21 >= ema55 ? bullCol : bearCol
+p21 = plot(showCloud ? ema21 : na, "EMA 21", color = color.new(emaCol, 20), linewidth = 1)
+p55 = plot(showCloud ? ema55 : na, "EMA 55", color = color.new(emaCol, 50), linewidth = 1)
+plot(showCloud ? ema200 : na, "EMA 200", color = color.new(#f0b90b, 0), linewidth = 2)
+fill(p21, p55, color = showCloud ? color.new(emaCol, 85) : na, title = "Trend cloud")
+
+// Trend = the Daily and the 4H trend when they agree, otherwise the chart's own EMA structure, otherwise sideways.
+int trendDir = anchorTrend == 1 and htfTrend == 1 ? 1 : anchorTrend == -1 and htfTrend == -1 ? -1 : ema21 > ema55 and close > ema200 ? 1 : ema21 < ema55 and close < ema200 ? -1 : 0
+var label trendTag = na
+if barstate.islast
+    label.delete(trendTag)
+    if showTrend
+        string arrow = trendDir == 1 ? "▲ " : trendDir == -1 ? "▼ " : "◆ "
+        string word = trendDir == 1 ? tr("UPTREND", "المسار صاعد") : trendDir == -1 ? tr("DOWNTREND", "المسار هابط") : tr("SIDEWAYS", "المسار عرضي")
+        string detail = anchorTf + (anchorTrend == 1 ? "▲" : anchorTrend == -1 ? "▼" : "◆") + "  " + htf + (htfTrend == 1 ? "▲" : htfTrend == -1 ? "▼" : "◆")
+        trendTag := label.new(bar_index + 12, ema200, arrow + word + "\n" + detail, style = label.style_label_left, color = color.new(trendDir == 1 ? bullCol : trendDir == -1 ? bearCol : color.gray, 10), textcolor = color.white, size = size.normal)
+
+// ───────────────────────────── Support / resistance zones and trendlines ─────────────────────────────
+float ph = ta.pivothigh(high, pivLen, pivLen)
+float pl = ta.pivotlow(low, pivLen, pivLen)
+var int   ph1t = na
+var float ph1y = na
+var int   ph2t = na
+var float ph2y = na
+var int   pl1t = na
+var float pl1y = na
+var int   pl2t = na
+var float pl2y = na
+var array<box> resZones = array.new<box>()
+var array<box> supZones = array.new<box>()
+if not na(ph) and barstate.isconfirmed
+    ph2t := ph1t
+    ph2y := ph1y
+    ph1t := time[pivLen]
+    ph1y := ph
+    if showZones and ready
+        resZones.push(box.new(bar_index - pivLen, ph + 0.15 * atr, bar_index, ph - 0.15 * atr, border_color = color.new(bearCol, 60), border_width = 1, bgcolor = color.new(bearCol, 88), extend = extend.right, text = tr("Resistance", "مقاومة"), text_size = size.tiny, text_color = color.new(bearCol, 20), text_halign = text.align_right))
+        if resZones.size() > zoneCount
+            box.delete(resZones.shift())
+if not na(pl) and barstate.isconfirmed
+    pl2t := pl1t
+    pl2y := pl1y
+    pl1t := time[pivLen]
+    pl1y := pl
+    if showZones and ready
+        supZones.push(box.new(bar_index - pivLen, pl + 0.15 * atr, bar_index, pl - 0.15 * atr, border_color = color.new(bullCol, 60), border_width = 1, bgcolor = color.new(bullCol, 88), extend = extend.right, text = tr("Support", "دعم"), text_size = size.tiny, text_color = color.new(bullCol, 20), text_halign = text.align_right))
+        if supZones.size() > zoneCount
+            box.delete(supZones.shift())
+var line tlRes = na
+var line tlSup = na
+if showTl and barstate.islast
+    line.delete(tlRes)
+    line.delete(tlSup)
+    if not na(ph2t)
+        tlRes := line.new(ph2t, ph2y, ph1t, ph1y, xloc = xloc.bar_time, color = ph1y < ph2y ? bearCol : bullCol, width = 2, extend = extend.right)
+    if not na(pl2t)
+        tlSup := line.new(pl2t, pl2y, pl1t, pl1y, xloc = xloc.bar_time, color = pl1y > pl2y ? bullCol : bearCol, width = 2, extend = extend.right)
+
+// ───────────────────────────── Alerts ─────────────────────────────
+alertcondition(newLong, "APEX GOLD BUY", "APEX GOLD BUY signal {{ticker}} {{interval}} @ {{close}}")
+alertcondition(newShort, "APEX GOLD SELL", "APEX GOLD SELL signal {{ticker}} {{interval}} @ {{close}}")
+alertcondition(evFill, "APEX GOLD limit filled", "APEX GOLD limit entry filled {{ticker}} {{interval}}")
+alertcondition(evCancel, "APEX GOLD limit cancelled", "APEX GOLD pending limit cancelled {{ticker}} {{interval}} — cancel the order at your broker")
+alertcondition(evTp1 or evTp2 or evTp3, "APEX GOLD target hit", "APEX GOLD target hit {{ticker}} {{interval}}")
+alertcondition(evSl, "APEX GOLD stop hit", "APEX GOLD stop hit {{ticker}} {{interval}}")
+alertcondition(evExit, "APEX GOLD trade closed", "APEX GOLD trade closed (breakeven / locked profit / reverse) {{ticker}} {{interval}}")
