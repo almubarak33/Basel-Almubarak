@@ -21,7 +21,8 @@ FOREX = {"EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF"}
 class Market:
     """What the Pine script reads from syminfo.* / timeframe.*"""
     name: str          # dataset stem, e.g. "OANDA_XAUUSD_4h"
-    exchange: str      # "OANDA", "BINANCE", "BINANCEX" (deep Binance mirror), "YF" (Yahoo), "TADAWUL", "NASDAQ", ...
+    exchange: str      # "OANDA", "BINANCE", "BINANCEX" (deep Binance mirror), "BINANCEF" (USDT perpetuals),
+                       # "HISTDATA" (histdata.com 1-minute quotes), "YF" (Yahoo), "TADAWUL", "NASDAQ", ...
     ticker: str        # syminfo.ticker, e.g. "XAUUSD"
     sym_type: str      # syminfo.type: "crypto" | "forex" | "cfd" | "futures" | "stock" | "index" | "fund"
     interval: str      # "5m" | "15m" | "1h" | "4h" | "1D"
@@ -47,13 +48,33 @@ def list_datasets() -> list[str]:
     return sorted(f[:-4] for f in os.listdir(DATA) if f.endswith(".csv") and f[:-4] not in EXCLUDE)
 
 
+def _read(name: str) -> np.ndarray:
+    """CSV rows as a float array; big files are cached as .npy next to the CSV (np.loadtxt is slow on a million rows)."""
+    path = os.path.join(DATA, name + ".csv")
+    cache = os.path.join(DATA, ".cache", name + ".npy")
+    if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(path):
+        return np.load(cache)
+    a = np.loadtxt(path, delimiter=",", skiprows=1, ndmin=2)
+    if len(a) > 50000:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        np.save(cache, a)
+    return a
+
+
+def load_1m(exchange: str, ticker: str) -> dict:
+    """1-minute bars written by the fetchers as <EXCHANGE>_<TICKER>_1m.npy (used for the intrabar replay)."""
+    a = np.load(os.path.join(DATA, f"{exchange}_{ticker}_1m.npy"))
+    return {"t": a[:, 0].astype(np.int64), "o": a[:, 1].copy(), "h": a[:, 2].copy(), "l": a[:, 3].copy(),
+            "c": a[:, 4].copy(), "v": a[:, 5].copy()}
+
+
 def load(name: str) -> dict:
     """-> {"t","o","h","l","c","v"} float64 numpy arrays (t as int64), oldest bar first.
 
     Applies the data-quality rules above: optional start trim, and high/low are widened to contain
     open/close on the rare malformed row.
     """
-    a = np.loadtxt(os.path.join(DATA, name + ".csv"), delimiter=",", skiprows=1, ndmin=2)
+    a = _read(name)
     if name in TRIM_START:
         t0 = dt.datetime.strptime(TRIM_START[name], "%Y-%m-%d").replace(tzinfo=dt.UTC).timestamp()
         a = a[a[:, 0] >= t0]
@@ -66,7 +87,7 @@ def load(name: str) -> dict:
 def _sym_type(exchange: str, ticker: str) -> str:
     if exchange.startswith("BINANCE"):
         return "crypto"
-    if exchange == "OANDA":
+    if exchange in ("OANDA", "HISTDATA"):                  # spot FX / CFD quotes
         return "forex" if ticker in FOREX else "cfd"
     if exchange == "YF":                                   # Yahoo: front futures contracts and FX quotes
         return "forex" if ticker in FOREX else "futures"

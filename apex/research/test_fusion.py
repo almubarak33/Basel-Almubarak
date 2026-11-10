@@ -66,7 +66,7 @@ MW = {"k1": 0.4, "k2": 1.5, "k3": 4.0, "w1": 0.6, "w2": 0.2, "trailOn": False, "
 
 
 def kernel(bars, long_at=(), short_at=(), dist=10.0, mgmt=MW, pullback=True, pb_frac=0.33, pb_bars=3, max_bars=0,
-           reverse=True, cost=0.0):
+           reverse=True, cost=0.0, mult=0.0):
     o, h, l, c = (np.array(x, dtype=float) for x in zip(*bars))
     n = len(c)
     ls = np.zeros(n, np.bool_)
@@ -81,7 +81,7 @@ def kernel(bars, long_at=(), short_at=(), dist=10.0, mgmt=MW, pullback=True, pb_
     rec, st, n_sig, n_fill, n_miss = F._core_fusion(o, h, l, c, ls, ss, d, d, nanv, nanv, z, z, z + 7, z + 7,
                                                    mgmt["k1"], mgmt["k2"], mgmt["k3"], mgmt["w1"], mgmt["w2"],
                                                    mgmt["trailOn"], mgmt["trailFrom"], mgmt["beOn"], cost, 0.01,
-                                                   int(mgmt.get("closeStop", 0)), pullback, pb_frac, pb_bars, max_bars, reverse)
+                                                   int(mgmt.get("closeStop", 0)), pullback, pb_frac, pb_bars, max_bars, reverse, mult)
     return rec, B.stats_dict(st), (n_sig, n_fill, n_miss)
 
 
@@ -134,6 +134,25 @@ def scenarios():
     # Cost in R uses the fill and the risk from the fill.
     rec, st, info = kernel([flat, (99, 99.5, 89, 92), flat], long_at=[0], cost=1.0)
     check("cost scaled by entry / risk of the fill", len(rec) == 1 and abs(rec[0, r_] - (-1.0 - 0.01 * 96.7 / 6.7)) < 1e-9, str(rec[0, r_]))
+    # v3 cost floor of the first target.  Market long at 100, stop 90 (risk 10), cost 0.1% -> 0.01R.
+    # Multiplier 3 with k1 = 0: TP1 = 3 costs = 0.03R = 100.3.  Bar 1 reaches 100.4 -> everything closes there.
+    full = {"k1": 0.0, "k2": 1.5, "k3": 4.0, "w1": 1.0, "w2": 0.0, "trailOn": False, "trailFrom": 1, "beOn": True}
+    rec, st, info = kernel([flat, (100, 100.4, 99.9, 100.1), flat], long_at=[0], pullback=False, mgmt=full, cost=0.1, mult=3.0)
+    check("cost floor: TP1 at 3 x cost, net +2 costs", len(rec) == 1 and abs(rec[0, tp1_] - 100.3) < 1e-9
+          and F.REASONS[int(rec[0, rs_])] == "TP" and abs(rec[0, r_] - 0.02) < 1e-9, str(rec))
+    # The profile's own k1 wins when it is further than the floor (0.05R > 0.03R).
+    rec, st, info = kernel([flat, (100, 100.6, 99.9, 100.1), flat], long_at=[0], pullback=False, mgmt=dict(full, k1=0.05), cost=0.1, mult=3.0)
+    check("cost floor: a larger profile target is kept", len(rec) == 1 and abs(rec[0, tp1_] - 100.5) < 1e-9 and abs(rec[0, r_] - 0.04) < 1e-9, str(rec))
+    # Multiplier off: TP1 = k1 exactly, even when that is below the cost (the trade then nets a loss).
+    rec, st, info = kernel([flat, (100, 100.1, 99.9, 100.0), flat], long_at=[0], pullback=False, mgmt=dict(full, k1=0.005), cost=0.1)
+    check("cost floor off: a target below the cost is a net loss", len(rec) == 1 and abs(rec[0, tp1_] - 100.05) < 1e-9 and rec[0, r_] < 0, str(rec))
+    # Cap: with an absurd cost (20% -> 2R) the floor stops at half of TP2 (0.75R = 107.5).
+    rec, st, info = kernel([flat, (100, 108, 99.9, 107), flat], long_at=[0], pullback=False, mgmt=full, cost=20.0, mult=3.0)
+    check("cost floor is capped at k2 / 2", len(rec) == 1 and abs(rec[0, tp1_] - 107.5) < 1e-9, str(rec))
+    # Limit fill: the floor uses the fill price and the risk from the fill (96.7, 6.7): 3 x 0.0967 above the fill.
+    rec, st, info = kernel([flat, (100, 100.5, 96, 97), (97, 97.2, 96.8, 97.1), flat], long_at=[0], mgmt=full, cost=0.1, mult=3.0)
+    check("cost floor after a limit fill is measured from the fill", len(rec) == 1 and abs(rec[0, tp1_] - (96.7 + 3 * 0.0967)) < 1e-9
+          and abs(rec[0, r_] - 2 * 0.0967 / 6.7) < 1e-9, str(rec))
 
 
 # ───────────────────────────── 3. stateful setups ─────────────────────────────
@@ -197,6 +216,20 @@ def setups():
     x = np.array([1, 2, 3, 4, 5, 9, 5, 4, 3, 2, 1, 1, 1], dtype=float)
     pv = F._pivots(x, 5, True)
     check("pivot high reported 5 bars after the peak", pv[10] == 9.0 and np.isnan(pv[9]) and np.nansum(pv) == 9.0, str(pv))
+    # Equal highs: the newest one is the pivot (reported 5 bars after it), the older one is not.
+    x = np.array([1, 2, 3, 4, 5, 9, 9, 5, 4, 3, 2, 1, 1, 1], dtype=float)
+    pv = F._pivots(x, 5, True)
+    check("pivot tie: the newest of equal highs is the pivot", pv[11] == 9.0 and np.isnan(pv[10]) and np.nansum(pv) == 9.0, str(pv))
+    pv = F._pivots(-x, 5, False)
+    check("pivot tie: the newest of equal lows is the pivot", pv[11] == -9.0 and np.isnan(pv[10]), str(pv))
+    # Forming higher-timeframe bar: chart bars after the last closed HTF bar are folded into one extra bar.
+    chart = {"t": np.array([0, 60, 120, 180, 240]), "o": np.array([1., 2, 3, 4, 5]), "h": np.array([2., 3, 4, 9, 6]),
+             "l": np.array([0., 1, 2, 3, 4]), "c": np.array([2., 3, 4, 5, 6]), "v": np.array([1., 1, 1, 1, 1])}
+    htf = {"t": np.array([0]), "o": np.array([1.]), "h": np.array([4.]), "l": np.array([0.]), "c": np.array([4.]), "v": np.array([3.])}
+    ext = F._with_forming(htf, chart, 180)
+    check("forming HTF bar appended from the chart tail", list(ext["t"]) == [0, 180] and ext["o"][1] == 4 and ext["h"][1] == 9
+          and ext["l"][1] == 3 and ext["c"][1] == 6 and ext["v"][1] == 2, str(ext))
+    check("no forming bar when the chart ends inside the last HTF bar", len(F._with_forming(htf, {k: v[:3] for k, v in chart.items()}, 180)["t"]) == 1)
     # barssince
     bs = F._barssince(np.array([False, True, False, False, True, False]))
     check("barssince", np.isnan(bs[0]) and list(bs[1:]) == [0, 1, 2, 0, 1], str(bs))

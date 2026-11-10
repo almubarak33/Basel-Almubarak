@@ -12,12 +12,21 @@ ok   reverse on: opposite signal closes at the close
 ok   reverse off: opposite signal ignored
 ok   time exit
 ok   cost scaled by entry / risk of the fill
+ok   cost floor: TP1 at 3 x cost, net +2 costs
+ok   cost floor: a larger profile target is kept
+ok   cost floor off: a target below the cost is a net loss
+ok   cost floor is capped at k2 / 2
+ok   cost floor after a limit fill is measured from the fill
 ok   ORB: fires once, on the first close above the 15-minute range
 ok   ORB: with the setup disabled the raw condition repeats (no 'fired' latch)
 ok   VWAP: resets on the new day
 ok   VWAP reclaim: one signal after >= 6 closes below
 ok   break & retest: fires on the retest bar only
 ok   pivot high reported 5 bars after the peak
+ok   pivot tie: the newest of equal highs is the pivot
+ok   pivot tie: the newest of equal lows is the pivot
+ok   forming HTF bar appended from the chart tail
+ok   no forming bar when the chart ends inside the last HTF bar
 ok   barssince
 ok   session mask follows New York daylight saving
 ok   Focus-equivalent configuration reproduces engine_b (176 dataset x profile cases, 16817 trades)

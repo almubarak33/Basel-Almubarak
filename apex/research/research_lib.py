@@ -46,6 +46,8 @@ UNDERLYING = {
     "AAPL": "AAPL", "NVDA": "NVDA", "TSLA": "TSLA", "MSFT": "MSFT", "XOM": "XOM",
     "1120": "RAJHI", "2010": "SABIC", "2222": "ARAMCO",
 }
+# Feeds added later for the gold / silver study (metals_lib.py); the cross-asset universe below stays as it was.
+METALS_STUDY_FEEDS = ("HISTDATA_", "BINANCEF_")
 # Holdout instruments: fixed up front, roughly one third of every asset class.
 HOLDOUT = {"SILVER", "BRENT", "GBPUSD", "USDCAD", "NDX", "DOW", "DAX", "SPY", "ETH", "XRP",
            "MSFT", "XOM", "TSLA", "RAJHI", "ARAMCO"}
@@ -80,7 +82,7 @@ def _meta(name: str):
 
 def universe(roles=("primary",), tfs=None, groups=("tune", "holdout")) -> list[Series]:
     """Load (and cache) every series of the requested roles / timeframes / groups."""
-    names = ds.list_datasets()
+    names = [n for n in ds.list_datasets() if not n.startswith(METALS_STUDY_FEEDS)]
     by_key: dict[tuple, list[str]] = {}
     for n in names:
         m, u = _meta(n)

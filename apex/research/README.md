@@ -25,6 +25,8 @@ trade engine, the market-data fetchers, the test suites and the studies.
 | `fusion_engine.py` | Port of APEX Fusion Pro on top of the verified kernels (GBB setups, sessions, pending limit orders, replay) |
 | `fusion_lib.py`, `study_fusion.py` | Fusion research helpers and every table of `apex/REPORT_FUSION.md` |
 | `test_fusion.py` | Fusion kernel and setup scenarios; the Focus-equivalent configuration must reproduce `engine_b` |
+| `fetch_histdata.py`, `fetch_binance_metals.py` | Deep gold / silver history (1-minute quotes 2010-2026; Binance perpetuals) |
+| `metals_lib.py`, `study_metals.py` | Gold / silver study on 1-minute replay: every table of `apex/REPORT_METALS.md` |
 | `build_tables.py` | Generates every table of the report into `results/tables.md` |
 | `build_report.py` | Fills the report templates with those tables: `apex/REPORT.md`, and `apex/REPORT_FUSION.md` with the argument `fusion` |
 | `results/` | Raw printed output of the tests and studies behind the report |
@@ -61,6 +63,7 @@ python3 test_tv_reference.py && python3 test_scenarios.py && python3 test_v2.py 
 python3 study_baseline.py; python3 study_v2.py; python3 study_edge.py; python3 study_filters.py
 python3 build_tables.py && python3 build_report.py
 python3 test_fusion.py && python3 study_fusion.py && python3 build_report.py fusion
+python3 study_metals.py && python3 build_report.py metals
 ```
 
 ## How the simulation rules relate

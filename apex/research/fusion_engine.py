@@ -74,7 +74,7 @@ class FParams:                       # defaults == the Pine input defaults
     sweepLen: int = 20
     divGap: int = 60
     orMin: int = 15
-    profile: str = "AUTO"            # "AUTO" | "MW" | "HW" | "BAL" | "HP" | "RUN" | "CUS"
+    profile: str = "AUTO"            # "AUTO" | "AUTO3" | "SHD" | "SNP" | "MW" | "HW" | "BAL" | "HP" | "RUN" | "ULT" | "CUS"
     swingLook: int = 10
     slBuf: float = 0.25
     slMinAtr: float = 0.8
@@ -93,6 +93,7 @@ class FParams:                       # defaults == the Pine input defaults
     cgMaxPct: float = 7.0
     costMode: str = "Auto"
     costCustom: float = 0.05
+    tp1CostMult: float = 0.0         # v3: first target at least this many round-trip costs away (0 = off)
 
 
 PROFILES = {  # k1, k2, k3, w1, w2, trailOn, trailFrom, beOn  (the script's profile table; SHD / SNP are new in v2)
@@ -103,7 +104,12 @@ PROFILES = {  # k1, k2, k3, w1, w2, trailOn, trailFrom, beOn  (the script's prof
     "HW":  {"k1": 0.5, "k2": 2.0, "k3": 5.0, "w1": 0.50, "w2": 0.25, "trailOn": False, "trailFrom": 1, "beOn": True},
     "HP":  {"k1": 0.3, "k2": 1.5, "k3": 4.0, "w1": 0.50, "w2": 0.25, "trailOn": True, "trailFrom": 1, "beOn": True},
     "RUN": {"k1": 1.0, "k2": 2.0, "k3": 8.0, "w1": 0.33, "w2": 0.33, "trailOn": True, "trailFrom": 2, "beOn": False},
+    # v3 "Ultra": first target = 5 round-trip costs, half closed there, breakeven, runner to 1.5R / 4R.
+    # On intraday charts of 1H and above it also widens the stop clamp to 6-12 ATR (ULTRA_STOP, see features()).
+    "ULT": {"k1": 0.005, "k2": 1.5, "k3": 4.0, "w1": 0.50, "w2": 0.25, "trailOn": False, "trailFrom": 1, "beOn": True,
+            "tp1CostMult": 5.0},
 }
+ULTRA_STOP = (6.0, 12.0)             # (min, max) x ATR for the Ultra profile on 1H-4H charts
 
 
 def asset_class(market, p: FParams) -> str:
@@ -133,14 +139,25 @@ def cost_pct(market, p: FParams) -> float:
     return 0.10 if ac == "crypto" else 0.06 if hi_cost else 0.01 if is_gold else 0.03
 
 
-def mgmt_of(market, p: FParams) -> dict:
+def resolve_profile(market, p: FParams) -> str:
+    """Profile name after Auto is resolved.  "AUTO" is the script as received (below 1H: Max Win-Rate with the
+    execution pack, Balanced Pro without it; 1H and above: High Win-Rate); "AUTO3" is the v2 / v3 script, where the
+    execution pack below 1H uses Sniper instead."""
     prof = p.profile
-    if prof == "AUTO":
-        prof = "HW" if market.tf_seconds >= 3600 else ("MW" if p.ltfPack else "BAL")
+    if prof in ("AUTO", "AUTO3"):
+        low = "SNP" if prof == "AUTO3" else "MW"
+        prof = "HW" if market.tf_seconds >= 3600 else (low if p.ltfPack else "BAL")
+    return prof
+
+
+def mgmt_of(market, p: FParams) -> dict:
+    prof = resolve_profile(market, p)
     if prof == "CUS":
         return {"k1": p.cTp1, "k2": p.cTp2, "k3": p.cTp3, "w1": p.cW1 / 100, "w2": p.cW2 / 100,
-                "trailOn": p.cTrail, "trailFrom": 1, "beOn": p.cBe}
-    return dict(PROFILES[prof])
+                "trailOn": p.cTrail, "trailFrom": 1, "beOn": p.cBe, "tp1CostMult": p.tp1CostMult}
+    m = dict(PROFILES[prof])
+    m["tp1CostMult"] = max(float(m.get("tp1CostMult", 0.0)), float(p.tp1CostMult))
+    return m
 
 
 # ───────────────────────────── data context (higher timeframes, sessions) ─────────────────────────────
@@ -172,9 +189,27 @@ def _session_keys(t: np.ndarray, anchor_hour: int, bucket_s: int) -> list:
 
 
 def _month_keys(daily: dict, exchange: str) -> list:
-    shift = 0 if exchange.startswith("BINANCE") else 12 * 3600
+    # OANDA / HISTDATA / Yahoo-futures daily bars open at 17:00-18:00 New York the evening before: +12h gives the
+    # trading date.  Crypto (00:00 UTC) and exchange-session stocks are already stamped on their own trading date.
+    shift = 12 * 3600 if exchange in ("OANDA", "HISTDATA", "YF") else 0
     idx = pd.to_datetime(np.asarray(daily["t"], dtype=np.int64) + shift, unit="s", utc=True)
     return list(zip(idx.year.to_numpy(), idx.month.to_numpy()))
+
+
+def _with_forming(htf: dict | None, chart: dict, span: int):
+    """Files hold closed bars only.  When the chart runs past the last closed higher-timeframe bar, append the
+    still-forming bar built from those chart bars, so the 'previous completed bar' lookup and the daily reset of
+    the session VWAP also work on the tail of the series (assumes the tail spans at most one such bar)."""
+    if htf is None or len(htf["t"]) == 0:
+        return htf
+    ct = np.asarray(chart["t"])
+    tail = ct >= htf["t"][-1] + span
+    if not tail.any():
+        return htf
+    i0 = int(np.argmax(tail))
+    add = {"t": ct[i0], "o": chart["o"][i0], "h": np.max(chart["h"][i0:]), "l": np.min(chart["l"][i0:]),
+           "c": chart["c"][-1], "v": np.sum(chart["v"][i0:])}
+    return {k: np.append(np.asarray(htf[k]), add[k]) for k in htf}
 
 
 _CTX: dict = {}
@@ -204,6 +239,13 @@ def context(name: str) -> dict:
         src = h1 if h1 is not None else chart
         h4 = _resample(src, _session_keys(src["t"], anchor_hour, 14400))
         daily = _resample(src, _session_keys(src["t"], anchor_hour, 86400))
+    else:
+        if tf < 3600:
+            h1 = _with_forming(h1, chart, 3600)
+        if tf < 14400:
+            h4 = _with_forming(h4, chart, 14400)
+        if tf < 86400:
+            daily = _with_forming(daily, chart, 86400)
     weekly = ds.weekly_from_daily(daily, m.exchange) if daily is not None else None
     monthly = _resample(daily, _month_keys(daily, m.exchange)) if daily is not None else None
     if tf >= 86400:
@@ -249,7 +291,9 @@ def anchor_seconds(tf: int) -> int:
 @njit(cache=True, error_model="numpy")
 def _pivots(x, n, high_side):
     """ta.pivothigh / ta.pivotlow(x, n, n): value reported n bars after the pivot bar (nan otherwise).
-    Ties: the pivot must be strictly beyond the n bars to its left and at least equal to the n bars to its right."""
+    Ties: the NEWEST of equal extremes is the pivot - an older equal value does not disqualify it, a newer equal
+    value does.  TradingView's reference does not document ties; this is the rule implemented by two open-source
+    Pine runtimes that were measured against TradingView (PineTS, PyneCore).  Not checked on a chart here."""
     m = len(x)
     out = np.full(m, NAN)
     for i in range(2 * n, m):
@@ -257,19 +301,19 @@ def _pivots(x, n, high_side):
         p = x[k]
         ok = not math.isnan(p)
         if ok:
-            for j in range(k - n, k):
-                if high_side and not (x[j] < p):
-                    ok = False
-                    break
-                if (not high_side) and not (x[j] > p):
-                    ok = False
-                    break
-        if ok:
-            for j in range(k + 1, i + 1):
+            for j in range(k - n, k):            # older bars: at most equal
                 if high_side and not (x[j] <= p):
                     ok = False
                     break
                 if (not high_side) and not (x[j] >= p):
+                    ok = False
+                    break
+        if ok:
+            for j in range(k + 1, i + 1):        # newer bars: strictly beyond
+                if high_side and not (x[j] < p):
+                    ok = False
+                    break
+                if (not high_side) and not (x[j] > p):
                     ok = False
                     break
         if ok:
@@ -553,8 +597,11 @@ def features(ctx: dict, p: FParams) -> dict:
         raw_s = (setup_s >= 0) & (p.dirMode != "Long only") & ~raw_l
 
         # stops, cost guard, volatility floor
-        sl_l = np.minimum(np.maximum(c - (B._rolling_min(l, int(p.swingLook)) - p.slBuf * atr), p.slMinAtr * atr), p.slMaxAtr * atr)
-        sl_s = np.minimum(np.maximum((B._rolling_max(h, int(p.swingLook)) + p.slBuf * atr) - c, p.slMinAtr * atr), p.slMaxAtr * atr)
+        sl_min, sl_max = p.slMinAtr, p.slMaxAtr
+        if resolve_profile(m, p) == "ULT" and 3600 <= tf < 86400:  # Ultra: wide stop on intraday charts of 1H and above
+            sl_min, sl_max = max(sl_min, ULTRA_STOP[0]), max(sl_max, ULTRA_STOP[1])
+        sl_l = np.minimum(np.maximum(c - (B._rolling_min(l, int(p.swingLook)) - p.slBuf * atr), sl_min * atr), sl_max * atr)
+        sl_s = np.minimum(np.maximum((B._rolling_max(h, int(p.swingLook)) + p.slBuf * atr) - c, sl_min * atr), sl_max * atr)
         cp = cost_pct(m, p)
         guard = bool(p.smallGuard) and tf < 3600
         cg_min = cp / 100 * c / (p.cgMaxPct / 100)
@@ -580,10 +627,25 @@ def features(ctx: dict, p: FParams) -> dict:
 
 # ───────────────────────────── trade kernel ─────────────────────────────
 @njit(cache=True, error_model="numpy")
+def _eff_k1(k1, k2, mult, costPct, entry, risk):
+    """First target in R: the profile's k1, or `mult` round-trip costs when that is further away.
+    The cost floor itself never goes beyond half of k2 (Pine: k1Eff)."""
+    if mult <= 0.0:
+        return k1
+    floor_r = mult * costPct / 100.0 * entry / risk
+    cap = 0.5 * k2
+    if floor_r > cap:
+        floor_r = cap
+    return floor_r if floor_r > k1 else k1
+
+
+@njit(cache=True, error_model="numpy")
 def _core_fusion(o, h, l, c, long_sig, short_sig, sl_dist_l, sl_dist_s, chand_l, chand_s, setup_l, setup_s,
                  score_l, score_s, k1, k2, k3, w1, w2, trail_on, trail_from, be_on, costPct, mintick,
-                 close_stop, use_pullback, pb_frac, pb_bars, max_bars, reverse_on):
+                 close_stop, use_pullback, pb_frac, pb_bars, max_bars, reverse_on, tp1_cost_mult=0.0):
     """engine_b._core + Fusion's pending pullback limit order, time exit and reverse switch (+ v2 close_stop).
+    v3: tp1_cost_mult > 0 puts the first target at least that many round-trip costs away from the entry
+    (effective k1 = max(k1, mult * cost in R), capped at half of k2), so a filled TP1 is never a net loss.
     Returns (records, stats, n_signals, n_filled, n_unfilled)."""
     n = len(c)
     cap = 0
@@ -610,6 +672,7 @@ def _core_fusion(o, h, l, c, long_sig, short_sig, sl_dist_l, sl_dist_s, chand_l,
     hit3 = False
     realized = 0.0
     open_w = 1.0
+    k1e = k1
     p_has = False
     p_dir = 1.0
     p_bar = 0
@@ -641,7 +704,7 @@ def _core_fusion(o, h, l, c, long_sig, short_sig, sl_dist_l, sl_dist_s, chand_l,
                 if (not hit1) and ((oi >= tp1) if is_long else (oi <= tp1)):
                     hit1 = True
                     w = w1 if w1 < open_w else open_w
-                    realized += w * k1
+                    realized += w * k1e
                     open_w -= w
                     if be_on:
                         sl = _pmax(sl, entry) if is_long else _pmin(sl, entry)
@@ -679,7 +742,7 @@ def _core_fusion(o, h, l, c, long_sig, short_sig, sl_dist_l, sl_dist_s, chand_l,
                         if (not hit1) and ((hi >= tp1) if is_long else (li <= tp1)):
                             hit1 = True
                             w = w1 if w1 < open_w else open_w
-                            realized += w * k1
+                            realized += w * k1e
                             open_w -= w
                             if be_on:
                                 sl = _pmax(sl, entry) if is_long else _pmin(sl, entry)
@@ -736,7 +799,8 @@ def _core_fusion(o, h, l, c, long_sig, short_sig, sl_dist_l, sl_dist_s, chand_l,
                         sl = p_stop
                         sl0 = p_stop
                         risk = (fill - p_stop) * d
-                        tp1 = entry + d * k1 * risk
+                        k1e = _eff_k1(k1, k2, tp1_cost_mult, costPct, entry, risk)
+                        tp1 = entry + d * k1e * risk
                         tp2 = entry + d * k2 * risk
                         t3 = entry + d * k3 * risk
                         tp3 = t3 if t3 > mintick else NAN
@@ -791,7 +855,8 @@ def _core_fusion(o, h, l, c, long_sig, short_sig, sl_dist_l, sl_dist_s, chand_l,
                 sl = ci - d * dist
                 sl0 = sl
                 risk = (entry - sl) * d
-                tp1 = entry + d * k1 * risk
+                k1e = _eff_k1(k1, k2, tp1_cost_mult, costPct, entry, risk)
+                tp1 = entry + d * k1e * risk
                 tp2 = entry + d * k2 * risk
                 t3 = entry + d * k3 * risk
                 tp3 = t3 if t3 > mintick else NAN
@@ -827,7 +892,7 @@ def simulate(ctx: dict, f: dict, p: FParams, mgmt: dict | None = None, cost_pct_
         np.ascontiguousarray(f["scoreL"], np.int64), np.ascontiguousarray(f["scoreS"], np.int64),
         float(m["k1"]), float(m["k2"]), float(m["k3"]), float(m["w1"]), float(m["w2"]), bool(m["trailOn"]),
         int(m["trailFrom"]), bool(m["beOn"]), float(cp), float(f["mintick"]), int(m.get("closeStop", 0)),
-        bool(up), float(p.pbFrac), int(p.pbBars), int(p.maxBars), bool(p.reverseOn))
+        bool(up), float(p.pbFrac), int(p.pbBars), int(p.maxBars), bool(p.reverseOn), float(m.get("tp1CostMult", 0.0)))
     trades = []
     for r in rec.tolist():
         tp3 = r[C_TP3]
@@ -897,13 +962,15 @@ def replay(ctx: dict, f: dict, fine: dict, p: FParams, mgmt: dict | None = None)
         B._f64(np.asarray(f["slDistL"])[di]), B._f64(np.asarray(f["slDistS"])[di]), ch_l, ch_s,
         np.ascontiguousarray(su_l[di]), np.ascontiguousarray(su_s[di]),
         np.ascontiguousarray(np.asarray(f["scoreL"], np.int64)[di]), np.ascontiguousarray(np.asarray(f["scoreS"], np.int64)[di]),
-        *args_tail, bool(f["usePullback"]), float(p.pbFrac), int(p.pbBars) * per_bar, int(p.maxBars) * per_bar, bool(p.reverseOn))
+        *args_tail, bool(f["usePullback"]), float(p.pbFrac), int(p.pbBars) * per_bar, int(p.maxBars) * per_bar, bool(p.reverseOn),
+        float(m.get("tp1CostMult", 0.0)))
     rec_c, _, _, _, _ = _core_fusion(
         B._f64(ch["o"]), B._f64(ch["h"]), B._f64(ch["l"]), B._f64(ch["c"]), ls_c, ss_c,
         B._f64(f["slDistL"]), B._f64(f["slDistS"]), B._f64(f["chandL"]), B._f64(f["chandS"]),
         np.ascontiguousarray(su_l), np.ascontiguousarray(su_s),
         np.ascontiguousarray(f["scoreL"], np.int64), np.ascontiguousarray(f["scoreS"], np.int64),
-        *args_tail, bool(f["usePullback"]), float(p.pbFrac), int(p.pbBars), int(p.maxBars), bool(p.reverseOn))
+        *args_tail, bool(f["usePullback"]), float(p.pbFrac), int(p.pbBars), int(p.maxBars), bool(p.reverseOn),
+        float(m.get("tp1CostMult", 0.0)))
     return _trades_from(rec_f), _trades_from(rec_c), fb["t"], d0
 
 
