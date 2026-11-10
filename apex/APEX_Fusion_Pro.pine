@@ -78,6 +78,7 @@ anchorCustom = input.timeframe("D", "", group = G_SIG, inline = "anc")
 reverseOn   = input.bool(true, "Opposite signal reverses an open trade", group = G_SIG)
 
 ltfPack     = input.bool(true, "Professional execution pack below 1H", group = G_LTF, tooltip = "On charts below 1H: enter with a limit order on a pullback instead of chasing the close, skip news/exhaustion candles and require a minimum volatility. In the gold tests this raised the 5m/15m win rate from ~55-67% to ~70-82%.")
+precise     = input.bool(true, "Precision entries below 1H: scanner setups only", group = G_LTF, tooltip = "Below 1H the Donchian breakout, SuperTrend pullback and SuperTrend flip triggers are switched off and only the scanner setups (break & retest, opening range, EMA pullback, VWAP reclaim) can open a trade, still behind the trend filters, the volatility floor and the limit entry. On 16.8 years of gold 5m data this gave fewer trades (about 25 a year) and the best result measured: 91% / 88% winners and +0.07R / +0.05R per trade in 2010-2019 / 2020-2026 with Sniper, against 90% / 85% and +0.06R / +0.02R with all triggers. The same scanner setups without the filters and the limit entry lost money (profit factor about 0.7).")
 pbFrac      = input.float(0.33, "Pullback entry: limit at × stop distance · valid bars", minval = 0.05, maxval = 0.9, step = 0.01, group = G_LTF, inline = "pb", tooltip = "After a signal, a limit order is placed this fraction of the stop distance back toward the stop. Risk and targets are measured from the fill. Signals whose limit is not filled are marked ✗ and are not trades.")
 pbBars      = input.int(3, "", minval = 1, maxval = 20, group = G_LTF, inline = "pb")
 maxBarAtr   = input.float(2.5, "Skip signal bars wider than × ATR", minval = 0.5, step = 0.1, group = G_LTF)
@@ -484,6 +485,7 @@ bool baseL = (not useAnchor or anchorTrend == 1) and inTradeSess
 bool baseS = (not useAnchor or anchorTrend == -1) and inTradeSess
 bool ltfOn = ltfPack and timeframe.isintraday and timeframe.in_seconds() < 3600
 bool usePullback = ltfOn
+bool apexOk = not (precise and ltfOn)
 bool okBar = not ltfOn or (high - low) <= maxBarAtr * atr
 bool trendGateL = baseL and scoreL >= minScore and (not useHtfGate or htfTrend == 1) and okBar
 bool trendGateS = baseS and scoreS >= minScore and (not useHtfGate or htfTrend == -1) and okBar
@@ -491,8 +493,8 @@ bool revGateL = baseL and htfTrend != -1
 bool revGateS = baseS and htfTrend != 1
 
 // Priority when several setups fire on one bar (label only; one trade either way).
-string setupL = not ready ? "" : useBrt and sBrtL and trendGateL ? "B&R" : useOrb and sOrbL and trendGateL ? "ORB" : useBrk and sBrkL and trendGateL ? "BRK" : useEma and sEmaL and trendGateL ? "EMA" : usePb and sPbL and trendGateL ? "PB" : useFlip and sFlipL and trendGateL ? "FLIP" : useVwap and sVwapL and trendGateL ? "VWAP" : useSweep and sSweepL and revGateL ? "SWEEP" : useDiv and sDivL and revGateL ? "DIV" : useReb and sRebL and revGateL ? "REB" : ""
-string setupS = not ready ? "" : useBrt and sBrtS and trendGateS ? "B&R" : useOrb and sOrbS and trendGateS ? "ORB" : useBrk and sBrkS and trendGateS ? "BRK" : useEma and sEmaS and trendGateS ? "EMA" : usePb and sPbS and trendGateS ? "PB" : useFlip and sFlipS and trendGateS ? "FLIP" : useVwap and sVwapS and trendGateS ? "VWAP" : useSweep and sSweepS and revGateS ? "SWEEP" : useDiv and sDivS and revGateS ? "DIV" : useReb and sRebS and revGateS ? "REB" : ""
+string setupL = not ready ? "" : useBrt and sBrtL and trendGateL ? "B&R" : useOrb and sOrbL and trendGateL ? "ORB" : useBrk and apexOk and sBrkL and trendGateL ? "BRK" : useEma and sEmaL and trendGateL ? "EMA" : usePb and apexOk and sPbL and trendGateL ? "PB" : useFlip and apexOk and sFlipL and trendGateL ? "FLIP" : useVwap and sVwapL and trendGateL ? "VWAP" : useSweep and sSweepL and revGateL ? "SWEEP" : useDiv and sDivL and revGateL ? "DIV" : useReb and sRebL and revGateL ? "REB" : ""
+string setupS = not ready ? "" : useBrt and sBrtS and trendGateS ? "B&R" : useOrb and sOrbS and trendGateS ? "ORB" : useBrk and apexOk and sBrkS and trendGateS ? "BRK" : useEma and sEmaS and trendGateS ? "EMA" : usePb and apexOk and sPbS and trendGateS ? "PB" : useFlip and apexOk and sFlipS and trendGateS ? "FLIP" : useVwap and sVwapS and trendGateS ? "VWAP" : useSweep and sSweepS and revGateS ? "SWEEP" : useDiv and sDivS and revGateS ? "DIV" : useReb and sRebS and revGateS ? "REB" : ""
 bool rawL = setupL != "" and dirMode != "Short only"
 bool rawS = setupS != "" and dirMode != "Long only" and not rawL
 
