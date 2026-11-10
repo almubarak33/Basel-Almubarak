@@ -58,7 +58,7 @@ usePb       = input.bool(true,  "Trigger: trend pullback resume", group = G_SIG)
 minScore    = input.int(7, "Minimum confluence score (0-7)", minval = 0, maxval = 7, group = G_SIG, tooltip = "7/7 counts aligned conditions (HTF trend, EMA200 side, EMA21/55 order, ADX above the threshold, ADX rising = above its value 3 bars ago and above 18, DI alignment, RSI side). The two ADX conditions are not directional and count for both sides. The score is not a calibrated win probability. In the backtests the score state itself carried the edge on 4H/1D long trades; the trigger added almost nothing.")
 adxMin      = input.float(25.0, "ADX trend threshold", minval = 5, step = 1, group = G_SIG)
 useTsm      = input.bool(true, "Momentum ensemble must agree (TSMOM 20/50/100/200)", group = G_SIG, tooltip = "Price must be above (long) / below (short) its close 20, 50, 100 and 200 bars ago.")
-dirMode     = input.string(DIR_AUTO, "Direction", options = [DIR_AUTO, "Both", "Long only", "Short only"], group = G_SIG, tooltip = "Auto: long only, except forex symbols where both sides trade. In the backtests (about 100 series, 5m to 1D) short trades lost money on metals, energy, indices and stocks and were flat on forex and crypto, on the tuning data and on unseen data alike.")
+dirMode     = input.string("Both", "Direction", options = ["Both", DIR_AUTO, "Long only", "Short only"], group = G_SIG, tooltip = "Auto: long only, except forex symbols where both sides trade. In the backtests (about 100 series, 5m to 1D) short trades lost money on metals, energy, indices and stocks and were flat on forex and crypto, on the tuning data and on unseen data alike.")
 htfMode     = input.string("Auto", "Higher timeframe · custom", options = ["Auto", "Custom"], group = G_SIG, inline = "htf", tooltip = "Auto: ≤5m→1H, ≤1H→4H, ≤4H→1D, ≤1D→1W, above→1M. HTF trend = close versus an EMA plus SuperTrend(3,10) on the previous completed higher-timeframe bar. EMA length: Auto uses 50 for an intraday HTF and 21 for 1D and above; Custom uses 50 below 1W and 21 from 1W. A Custom timeframe lower than the chart is replaced by the chart timeframe.")
 htfCustom   = input.timeframe("240", "", group = G_SIG, inline = "htf")
 
@@ -317,6 +317,15 @@ keepMarker(array<label> markers, label id, int limit) =>
         label.delete(markers.shift())
     id
 
+// Closed trades stay on the chart (last 5) with their level tags, like a trade-zone drawing.
+var array<Trade> closedTr = array.new<Trade>()
+var array<label> closedTags = array.new<label>()
+closedTag(float price, string txt, color bg) =>
+    if not na(price)
+        closedTags.push(label.new(bar_index, price, txt + " " + fmt(price), style = label.style_label_left, color = color.new(bg, 10), textcolor = color.white, size = size.small))
+        while closedTags.size() > 20
+            label.delete(closedTags.shift())
+
 deleteTradeVisuals(Trade t) =>
     if not na(t.lnEntry)
         line.delete(t.lnEntry)
@@ -394,7 +403,14 @@ closeTrade(Trade t, float px, string reason) =>
         string tip = reason + " @ " + fmt(px) + " | " + (R >= 0 ? "+" : "") + str.tostring(R, "#.##") + "R"
         label mark = label.new(bar_index, px, txt, style = label.style_none, textcolor = R > 0 ? bullCol : R < 0 ? bearCol : neutCol, size = size.tiny, tooltip = tip)
         keepMarker(eventMarkers, mark, 12)
-    deleteTradeVisuals(t)
+    if showLevels
+        closedTag(t.tp3, "TP3", bullCol)
+        closedTag(t.tp2, "TP2", bullCol)
+        closedTag(t.tp1, "TP1", bullCol)
+        closedTag(t.sl0, "SL", bearCol)
+    closedTr.push(t)
+    while closedTr.size() > 5
+        deleteTradeVisuals(closedTr.shift())
     R
 
 openTrade(int d, string trig, int score) =>
