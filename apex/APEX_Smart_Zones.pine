@@ -5,12 +5,16 @@
 // (4146.92, 4134.14-4138.27, 4084.48, 4054.40, 4029.12-4029.83). The zone thickness and the trade rules are an
 // approximation: the original's code is not public.
 // Rules: the three nearest resistance zones above price and the three nearest support zones below it are drawn.
-// The first touch of a zone opens a trade against the move, the stop sits just beyond the zone and the target is
-// the nearest zone on the other side. One trade at a time, each zone is traded once. Evaluated on bar close.
-// Measured on 16.8 years of 1-minute gold data (2010-2019 / 2020-2026, cost 0.01%):
-//   15m, target = opposite zone: about 1.7 trades a day,  6% /  7% winners, -0.39R / -0.24R per trade, PF 0.65 / 0.77
-//   15m, target = 1R:            about 2.2 trades a day, 37% / 43% winners, -0.43R / -0.28R per trade, PF 0.42 / 0.57
-//   All 12 variants tested on 5m and 15m lost money (profit factor 0.32 to 0.77).
+// The first touch of a zone opens a trade against the move: entry at the zone edge, stop one ATR beyond the entry
+// (read off the original's price-scale labels: 4056.245 / 4048.813 around the 4054.39 low), target = the nearest
+// zone on the other side. One trade at a time, each zone is traded once. Evaluated on bar close.
+// The price scale shows the next sell plan and the next buy plan: entry (grey), stop (red), target (green).
+// Measured on 16.8 years of 1-minute gold data (2010-2019 / 2020-2026, cost 0.01%), this rule:
+//   15m, target = opposite zone: 1.5 trades a day, 10% / 11% winners, -0.28R / -0.22R per trade, PF 0.72 / 0.78
+//   15m, target = 1R:            2.1 trades a day, 40% / 44% winners, -0.31R / -0.20R per trade, PF 0.53 / 0.67
+//    5m, target = opposite zone: 4.5 trades a day, 10% / 12% winners, -0.36R / -0.26R per trade, PF 0.66 / 0.75
+//   Every variant tested lost money. With a small target and a wide stop (0.5 ATR / 5-8 ATR) the win rate is
+//   85-92% and the result is still negative (PF 0.44 / 0.59).
 // No table.
 //@version=6
 indicator("APEX Smart Zones", shorttitle = "APEX ZONES", overlay = true, max_boxes_count = 100, max_labels_count = 200)
@@ -20,7 +24,8 @@ lookback  = input.int(250, "عمر المنطقة بالشموع · Zone life (b
 wK        = input.float(0.25, "نصف سماكة المنطقة × ATR · Zone half-width", minval = 0.05, maxval = 2, step = 0.05)
 maxRes    = input.int(3, "عدد مناطق المقاومة · Resistance zones", minval = 1, maxval = 6)
 maxSup    = input.int(3, "عدد مناطق الدعم · Support zones", minval = 1, maxval = 6)
-bufK      = input.float(0.10, "الوقف خلف المنطقة × ATR · Stop beyond the zone", minval = 0.01, maxval = 2, step = 0.05)
+slAtr     = input.float(1.0, "الوقف × ATR من الدخول · Stop distance from entry", minval = 0.1, maxval = 10, step = 0.1)
+showPlan  = input.bool(true, "وسوم الخطة على المحور · Plan labels on the price scale")
 showTrades = input.bool(true, "رسم الصفقات · Draw trades")
 keepTrades = input.int(6, "عدد الصفقات المحفوظة · Keep last N trades", minval = 0, maxval = 30)
 resCol    = input.color(#f23645, "ألوان المقاومة · الدعم", inline = "c")
@@ -148,7 +153,7 @@ if barstate.isconfirmed
     // 2) Entry: first touch of one of the nearest zones as they stood at the previous bar's close.
     if na(cur) and not na(atrPrev) and atrPrev > 0
         float w1 = wK * atrPrev
-        float buf = bufK * atrPrev
+        float stopDist = slAtr * atrPrev
         array<int> rs = nearest(resLv, closePrev, w1, 1, maxRes)
         array<int> ss = nearest(supLv, closePrev, w1, -1, maxSup)
         bool taken = false
@@ -160,7 +165,7 @@ if barstate.isconfirmed
                     taken := true
                     resUsed.set(idx, true)
                     if ss.size() > 0
-                        float stopPx = resLv.get(idx) + w1 + buf
+                        float stopPx = e + stopDist
                         float target = supLv.get(ss.get(0)) + w1
                         if e - target > 0.3 * (stopPx - e)
                             cur := openTrade(-1, e, stopPx, target)
@@ -178,7 +183,7 @@ if barstate.isconfirmed
                     taken := true
                     supUsed.set(idx, true)
                     if rs.size() > 0
-                        float stopPx = supLv.get(idx) - w1 - buf
+                        float stopPx = e - stopDist
                         float target = resLv.get(rs.get(0)) - w1
                         if target - e > 0.3 * (e - stopPx)
                             cur := openTrade(1, e, stopPx, target)
@@ -217,6 +222,32 @@ if barstate.islast and not na(atr)
         for k = 0 to ss.size() - 1
             float lv = supLv.get(ss.get(k))
             zoneBoxes.push(box.new(supBorn.get(ss.get(k)) - pivLen, lv + w, bar_index + 12, lv - w, border_color = color.new(supCol, 10), border_width = 1, bgcolor = color.new(supCol, 75), text = "SUPPORT  " + fmt(lv), text_size = size.small, text_color = color.white, text_halign = text.align_right, text_valign = text.align_center))
+
+// ───────────────────────────── Next plan on the price scale ─────────────────────────────
+// Nearest untraded resistance (sell plan) and support (buy plan) as of this bar: entry, stop, target.
+float planSellE = na
+float planSellSl = na
+float planSellTp = na
+float planBuyE = na
+float planBuySl = na
+float planBuyTp = na
+if showPlan and not na(atr) and atr > 0
+    float wp = wK * atr
+    array<int> prs = nearest(resLv, close, wp, 1, maxRes)
+    array<int> pss = nearest(supLv, close, wp, -1, maxSup)
+    if prs.size() > 0 and pss.size() > 0
+        planSellE := resLv.get(prs.get(0)) - wp
+        planSellSl := planSellE + slAtr * atr
+        planSellTp := supLv.get(pss.get(0)) + wp
+        planBuyE := supLv.get(pss.get(0)) + wp
+        planBuySl := planBuyE - slAtr * atr
+        planBuyTp := resLv.get(prs.get(0)) - wp
+plot(planSellE, "Sell entry", color = color.gray, display = display.price_scale)
+plot(planSellSl, "Sell stop", color = resCol, display = display.price_scale)
+plot(planSellTp, "Sell target", color = supCol, display = display.price_scale)
+plot(planBuyE, "Buy entry", color = color.gray, display = display.price_scale)
+plot(planBuySl, "Buy stop", color = resCol, display = display.price_scale)
+plot(planBuyTp, "Buy target", color = supCol, display = display.price_scale)
 
 alertcondition(evSell, "APEX ZONES SELL", "APEX ZONES: price touched a resistance zone {{ticker}} {{interval}}")
 alertcondition(evBuy, "APEX ZONES BUY", "APEX ZONES: price touched a support zone {{ticker}} {{interval}}")
