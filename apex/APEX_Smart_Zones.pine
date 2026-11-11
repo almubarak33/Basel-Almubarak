@@ -11,7 +11,6 @@
 //   15m, target = opposite zone: about 1.7 trades a day,  6% /  7% winners, -0.39R / -0.24R per trade, PF 0.65 / 0.77
 //   15m, target = 1R:            about 2.2 trades a day, 37% / 43% winners, -0.43R / -0.28R per trade, PF 0.42 / 0.57
 //   All 12 variants tested on 5m and 15m lost money (profit factor 0.32 to 0.77).
-//   (The tests were run without the merging of neighbouring pivots that the drawing uses.)
 // No table.
 //@version=6
 indicator("APEX Smart Zones", shorttitle = "APEX ZONES", overlay = true, max_boxes_count = 100, max_labels_count = 200)
@@ -63,21 +62,6 @@ nearest(array<float> lv, float ref, float w, int side, int maxN) =>
                 sel.push(bi)
                 last := best
     sel
-
-// A new pivot within 3 half-widths of an existing zone is merged into it (the zone moves to their average).
-addZone(array<float> lv, array<int> born, array<bool> used, float v, float w) =>
-    int hit = -1
-    if lv.size() > 0
-        for i = 0 to lv.size() - 1
-            if hit < 0 and math.abs(lv.get(i) - v) < 3 * w
-                hit := i
-    if hit >= 0
-        lv.set(hit, (lv.get(hit) + v) / 2)
-        born.set(hit, bar_index)
-    else
-        lv.push(v)
-        born.push(bar_index)
-        used.push(false)
 
 // A zone is dropped when it is older than the lookback or when a bar closes beyond it.
 prune(array<float> lv, array<int> born, array<bool> used, bool isRes, float w) =>
@@ -205,10 +189,14 @@ if barstate.isconfirmed
                                 cur := na
 
     // 3) Update the zone store with this bar: new confirmed pivots, then drop old or broken zones.
-    if not na(ph) and not na(atr)
-        addZone(resLv, resBorn, resUsed, ph, wK * atr)
-    if not na(pl) and not na(atr)
-        addZone(supLv, supBorn, supUsed, pl, wK * atr)
+    if not na(ph)
+        resLv.push(ph)
+        resBorn.push(bar_index)
+        resUsed.push(false)
+    if not na(pl)
+        supLv.push(pl)
+        supBorn.push(bar_index)
+        supUsed.push(false)
     if not na(atr)
         prune(resLv, resBorn, resUsed, true, wK * atr)
         prune(supLv, supBorn, supUsed, false, wK * atr)
