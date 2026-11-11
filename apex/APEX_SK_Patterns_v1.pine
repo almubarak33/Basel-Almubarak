@@ -15,7 +15,7 @@
 //   TP1 is 0.27 of the risk, so about 79% winners is what a random entry gives; the edge measured is close to zero.
 // No table.
 //@version=6
-indicator("APEX SK Patterns", shorttitle = "APEX SK", overlay = true, max_labels_count = 500, max_lines_count = 300, max_boxes_count = 100)
+indicator("APEX SK Patterns v1", shorttitle = "APEX SK v1", overlay = true, max_labels_count = 500, max_lines_count = 300, max_boxes_count = 100)
 
 const string S_ZERO = "Point 0 · النقطة 0"
 const string S_B = "Point B · النقطة B"
