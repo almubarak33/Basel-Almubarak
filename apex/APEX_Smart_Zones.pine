@@ -1,0 +1,187 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// APEX Smart Zones — daily sell / buy zones for scalping gold on 5m-15m charts.
+// Idea (as explained in the video this was modelled on): at the start of each day the chart shows two sell zones
+// above price and two buy zones below it. When price first touches a zone a trade is opened against the move,
+// the stop sits just beyond the zone and the target is the first zone on the other side.
+// The original indicator is closed-source, so its zone formula is unknown: three public formulas are offered here
+// (floor pivots, average-daily-range bands, previous day's high / low). None of them is the original.
+// Zones are fixed for the whole day from the previous days' data (no repainting); trades are evaluated on bar close.
+// Measured on 16.8 years of 1-minute gold data (2010-2019 / 2020-2026, cost 0.01%), default settings:
+//   about 1.3 trades a day, 32% / 31% winners, -0.10R / -0.07R per trade, profit factor 0.85 / 0.89.
+//   All 24 variants tested (3 formulas x 2 zone widths x 4 targets) lost money: profit factor 0.62 to 0.92.
+// No table.
+//@version=6
+indicator("APEX Smart Zones", shorttitle = "APEX ZONES", overlay = true, max_boxes_count = 200, max_labels_count = 200, max_lines_count = 50)
+
+const string M_PIV = "Pivot · نقاط الارتكاز"
+const string M_ADR = "ADR bands · نطاق المدى اليومي"
+const string M_PRV = "Previous day · قمة وقاع أمس"
+const string T_OPP = "Opposite zone · المنطقة المقابلة"
+const string T_MID = "Middle · منتصف اليوم"
+
+method    = input.string(M_PIV, "طريقة المناطق · Zone method", options = [M_PIV, M_ADR, M_PRV], tooltip = "Pivot: classic floor pivots R1 / R2 / S1 / S2 from the previous day. ADR bands: day open ± 0.5 and ± 1.0 average daily range (14 days). Previous day: yesterday's high / low and half a daily range beyond them. Gold, 16.8 years, target = opposite zone: Pivot lost 0.10R / 0.07R per trade, ADR 0.08R / 0.10R, Previous day 0.13R / 0.16R.")
+wK        = input.float(0.05, "نصف سماكة المنطقة × المدى اليومي · Zone half-width", minval = 0.01, maxval = 0.3, step = 0.01)
+bufK      = input.float(0.10, "الوقف خلف المنطقة × المدى اليومي · Stop beyond the zone", minval = 0.01, maxval = 0.5, step = 0.01)
+tpMode    = input.string(T_OPP, "الهدف · Target", options = [T_OPP, T_MID])
+showTrades = input.bool(true, "رسم الصفقات · Draw trades")
+keepTrades = input.int(6, "عدد الصفقات المحفوظة · Keep last N trades", minval = 0, maxval = 30)
+keepDays  = input.int(3, "عدد الأيام المرسومة · Days of zones kept", minval = 1, maxval = 20)
+sellCol   = input.color(#f23645, "ألوان البيع · الشراء", inline = "c")
+buyCol    = input.color(#22ab94, "", inline = "c")
+
+fmt(float v) => str.tostring(v, format.mintick)
+
+if barstate.isfirst and not timeframe.isintraday
+    runtime.error("APEX Smart Zones works on intraday charts (5m - 15m recommended).")
+
+// ───────────────────────────── Daily inputs (previous completed day: no repainting) ─────────────────────────────
+[pH, pL, pC, adr] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1], ta.sma(high - low, 14)[1]], lookahead = barmerge.lookahead_on)
+bool newDay = timeframe.change("D")
+var float dayOpen = na
+if newDay
+    dayOpen := open
+
+float pivot = (pH + pL + pC) / 3
+float r1 = method == M_PIV ? 2 * pivot - pL : method == M_ADR ? dayOpen + 0.5 * adr : pH
+float s1 = method == M_PIV ? 2 * pivot - pH : method == M_ADR ? dayOpen - 0.5 * adr : pL
+float r2 = method == M_PIV ? pivot + (pH - pL) : method == M_ADR ? dayOpen + adr : pH + 0.5 * adr
+float s2 = method == M_PIV ? pivot - (pH - pL) : method == M_ADR ? dayOpen - adr : pL - 0.5 * adr
+float mid = method == M_PIV ? pivot : method == M_ADR ? dayOpen : (pH + pL) / 2
+float w = wK * adr
+float buf = bufK * adr
+bool zonesOk = not na(r1) and not na(s1) and not na(r2) and not na(s2) and not na(adr) and adr > 0
+
+// ───────────────────────────── Zone drawing ─────────────────────────────
+var array<box> zoneBoxes = array.new<box>()
+var box bR1 = na
+var box bR2 = na
+var box bS1 = na
+var box bS2 = na
+zoneBox(float level, color col, string txt) =>
+    box.new(bar_index, level + w, bar_index + 8, level - w, border_color = color.new(col, 20), border_width = 1, bgcolor = color.new(col, 80), text = txt, text_size = size.small, text_color = color.new(col, 0), text_halign = text.align_right, text_valign = text.align_center)
+if newDay and zonesOk
+    bR2 := zoneBox(r2, sellCol, "منطقة بيع 2 · " + fmt(r2))
+    bR1 := zoneBox(r1, sellCol, "منطقة بيع 1 · " + fmt(r1))
+    bS1 := zoneBox(s1, buyCol, "منطقة شراء 1 · " + fmt(s1))
+    bS2 := zoneBox(s2, buyCol, "منطقة شراء 2 · " + fmt(s2))
+    zoneBoxes.push(bR2)
+    zoneBoxes.push(bR1)
+    zoneBoxes.push(bS1)
+    zoneBoxes.push(bS2)
+    while zoneBoxes.size() > 4 * keepDays
+        box.delete(zoneBoxes.shift())
+else if not na(bR1)
+    bR2.set_right(bar_index + 8)
+    bR1.set_right(bar_index + 8)
+    bS1.set_right(bar_index + 8)
+    bS2.set_right(bar_index + 8)
+
+// ───────────────────────────── Trades ─────────────────────────────
+type Trade
+    int   dir
+    int   entryBar
+    float entry
+    float sl
+    float tp
+    box   bxRisk
+    box   bxReward
+    label lbSig
+    label lbSl
+    label lbTp
+
+var Trade cur = na
+var array<Trade> closedTrades = array.new<Trade>()
+var array<bool> used = array.new<bool>(4, false)
+if newDay
+    used.fill(false)
+
+deleteTrade(Trade t) =>
+    box.delete(t.bxRisk)
+    box.delete(t.bxReward)
+    label.delete(t.lbSig)
+    label.delete(t.lbSl)
+    label.delete(t.lbTp)
+
+extendTrade(Trade t, int x) =>
+    if not na(t.bxRisk)
+        t.bxRisk.set_right(x)
+        t.bxReward.set_right(x)
+        t.lbSl.set_x(x)
+        t.lbTp.set_x(x)
+
+openTrade(int d, float e, float stopPx, float target) =>
+    Trade t = Trade.new(d, bar_index, e, stopPx, target)
+    if showTrades
+        int xr = bar_index + 3
+        t.bxRisk := box.new(bar_index, math.max(e, stopPx), xr, math.min(e, stopPx), border_color = color.new(sellCol, 100), bgcolor = color.new(sellCol, 45))
+        t.bxReward := box.new(bar_index, math.max(e, target), xr, math.min(e, target), border_color = color.new(buyCol, 100), bgcolor = color.new(buyCol, 55))
+        t.lbSl := label.new(xr, stopPx, "SL " + fmt(stopPx), style = label.style_label_left, color = color.new(sellCol, 10), textcolor = color.white, size = size.small)
+        t.lbTp := label.new(xr, target, "TP " + fmt(target), style = label.style_label_left, color = color.new(buyCol, 10), textcolor = color.white, size = size.small)
+        t.lbSig := label.new(bar_index, d == 1 ? math.min(low, stopPx) : math.max(high, stopPx), d == 1 ? "شراء" : "بيع", style = d == 1 ? label.style_label_up : label.style_label_down, color = d == 1 ? buyCol : sellCol, textcolor = color.white, size = size.small, tooltip = "Entry " + fmt(e))
+    t
+
+// reason: "SL", "TP", "EOD" (new day)
+finishTrade(Trade t, string reason) =>
+    extendTrade(t, bar_index)
+    if not na(t.lbSl)
+        if reason == "SL"
+            t.lbSl.set_text("❌ SL " + fmt(t.sl))
+        else if reason == "TP"
+            t.lbTp.set_text("✅ TP " + fmt(t.tp))
+        else
+            t.lbTp.set_text("خروج نهاية اليوم · " + fmt(open))
+            t.lbTp.set_y(open)
+            t.lbTp.set_color(color.new(color.gray, 10))
+    closedTrades.push(t)
+    while closedTrades.size() > keepTrades
+        deleteTrade(closedTrades.shift())
+
+bool evSell = false
+bool evBuy = false
+bool evTp = false
+bool evSl = false
+
+// 1) Manage the open trade on bars after its entry bar (stop first when a bar touches both).
+if barstate.isconfirmed and not na(cur) and bar_index > cur.entryBar
+    int d = cur.dir
+    if newDay
+        finishTrade(cur, "EOD")
+        cur := na
+    else if d == 1 ? low <= cur.sl : high >= cur.sl
+        evSl := true
+        finishTrade(cur, "SL")
+        cur := na
+    else if d == 1 ? high >= cur.tp : low <= cur.tp
+        evTp := true
+        finishTrade(cur, "TP")
+        cur := na
+    else
+        extendTrade(cur, bar_index + 3)
+
+// 2) Entries: the first touch of each zone, once per zone per day, one trade at a time.
+if barstate.isconfirmed and zonesOk and not na(dayOpen)
+    array<float> levels = array.from(r1, r2, s1, s2)
+    for i = 0 to 3
+        if na(cur) and not used.get(i)
+            int d = i < 2 ? -1 : 1
+            float lv = levels.get(i)
+            float e = d == -1 ? lv - w : lv + w
+            float stopPx = d == -1 ? lv + w + buf : lv - w - buf
+            bool touched = d == -1 ? high >= e and open < e : low <= e and open > e
+            if touched
+                used.set(i, true)
+                float target = tpMode == T_MID ? mid : d == -1 ? s1 + w : r1 - w
+                if (target - e) * d > 0
+                    cur := openTrade(d, e, stopPx, target)
+                    evSell := d == -1
+                    evBuy := d == 1
+                    // Unknown order inside the entry bar: if it also reached the stop, count the stop.
+                    if d == 1 ? low <= stopPx : high >= stopPx
+                        evSl := true
+                        finishTrade(cur, "SL")
+                        cur := na
+
+alertcondition(evSell, "APEX ZONES SELL", "APEX ZONES: price touched a sell zone {{ticker}} {{interval}}")
+alertcondition(evBuy, "APEX ZONES BUY", "APEX ZONES: price touched a buy zone {{ticker}} {{interval}}")
+alertcondition(evTp, "APEX ZONES target hit", "APEX ZONES target hit {{ticker}} {{interval}}")
+alertcondition(evSl, "APEX ZONES stop hit", "APEX ZONES stop hit {{ticker}} {{interval}}")
