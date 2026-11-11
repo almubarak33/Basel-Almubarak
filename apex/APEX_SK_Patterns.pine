@@ -13,6 +13,7 @@
 //   Profit per trade, a quarter closed at each target, stop to entry after TP1:
 //    4H +0.09R / +0.05R,  1H +0.01R / +0.02R,  15m +0.02R / +0.03R,  5m -0.01R / -0.04R.
 //   TP1 is 0.27 of the risk, so about 79% winners is what a random entry gives; the edge measured is close to zero.
+// After TP1 the stop moves to the entry price (the rule used in the measurements above).
 // No table.
 //@version=6
 indicator("APEX SK Patterns", shorttitle = "APEX SK", overlay = true, max_labels_count = 500, max_lines_count = 300, max_boxes_count = 100)
@@ -81,6 +82,15 @@ type Trade
     float tp3
     float tp4
     int   hits = 0
+    box   bxRisk
+    box   bxReward
+    line  lnEntry
+    line  lnSl
+    line  ln1
+    line  ln2
+    line  ln3
+    line  ln4
+    label lbEntry
     label lbSl
     label lb1
     label lb2
@@ -89,19 +99,37 @@ type Trade
 
 var array<Trade> trades = array.new<Trade>()
 
-tpTag(float y, string txt) =>
-    label.new(bar_index + lineLen, y, txt, style = label.style_label_left, color = color.new(tpCol, 0), textcolor = color.black, size = size.small)
+// Soft tag at the right edge of the trade box (pending levels are pale, reached targets turn solid).
+softTag(int x, float y, string txt, color col) =>
+    label.new(x, y, txt, style = label.style_label_left, color = color.new(col, 82), textcolor = color.new(col, 0), size = size.small)
 
-markHit(label lb, int k) =>
-    lb.set_text("✓ هدف " + str.tostring(k))
+markHit(label lb, line ln, int k, float px) =>
+    lb.set_text("✓ TP" + str.tostring(k) + " " + fmt(px))
     lb.set_color(color.new(hitCol, 0))
     lb.set_textcolor(color.white)
-    lb.set_x(bar_index)
+    ln.set_color(color.new(hitCol, 0))
+
+extendTrade(Trade t, int x) =>
+    t.bxRisk.set_right(x)
+    t.bxReward.set_right(x)
+    t.lnEntry.set_x2(x)
+    t.lnSl.set_x2(x)
+    t.ln1.set_x2(x)
+    t.ln2.set_x2(x)
+    t.ln3.set_x2(x)
+    t.ln4.set_x2(x)
+    t.lbEntry.set_x(x)
+    t.lbSl.set_x(x)
+    t.lb1.set_x(x)
+    t.lb2.set_x(x)
+    t.lb3.set_x(x)
+    t.lb4.set_x(x)
 
 bool evLong = false
 bool evShort = false
 bool evTp = false
 bool evSl = false
+bool evBe = false
 
 if barstate.isconfirmed
     // 1) Manage open trades (bars after the entry bar; stop first when a bar touches both).
@@ -109,28 +137,47 @@ if barstate.isconfirmed
         for i = trades.size() - 1 to 0
             Trade t = trades.get(i)
             if t.dir == 1 ? low <= t.sl : high >= t.sl
-                t.lbSl.set_text("✗ وقف " + fmt(t.sl))
-                t.lbSl.set_x(bar_index)
-                evSl := true
+                if t.hits == 0
+                    t.lbSl.set_text("✗ SL " + fmt(t.sl))
+                    t.lbSl.set_color(color.new(slCol, 0))
+                    t.lbSl.set_textcolor(color.white)
+                    evSl := true
+                else
+                    // stop already at the entry price: the remainder leaves without a loss
+                    t.lbSl.set_text("BE " + fmt(t.sl))
+                    evBe := true
+                extendTrade(t, bar_index)
                 trades.remove(i)
             else
                 if t.hits == 0 and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
                     t.hits := 1
-                    markHit(t.lb1, 1)
+                    markHit(t.lb1, t.ln1, 1, t.tp1)
                     evTp := true
+                    // stop to the entry price after TP1
+                    t.sl := t.entry
+                    t.lnSl.set_y1(t.entry)
+                    t.lnSl.set_y2(t.entry)
+                    t.lbSl.set_y(t.entry)
+                    t.lbSl.set_text("SL → BE")
+                    t.bxRisk.set_bgcolor(color.new(slCol, 100))
+                    t.lbEntry.set_text("")
+                    t.lbEntry.set_color(color.new(entryCol, 100))
                 if t.hits == 1 and (t.dir == 1 ? high >= t.tp2 : low <= t.tp2)
                     t.hits := 2
-                    markHit(t.lb2, 2)
+                    markHit(t.lb2, t.ln2, 2, t.tp2)
                     evTp := true
                 if t.hits == 2 and (t.dir == 1 ? high >= t.tp3 : low <= t.tp3)
                     t.hits := 3
-                    markHit(t.lb3, 3)
+                    markHit(t.lb3, t.ln3, 3, t.tp3)
                     evTp := true
                 if t.hits == 3 and (t.dir == 1 ? high >= t.tp4 : low <= t.tp4)
                     t.hits := 4
-                    markHit(t.lb4, 4)
+                    markHit(t.lb4, t.ln4, 4, t.tp4)
                     evTp := true
+                    extendTrade(t, bar_index)
                     trades.remove(i)
+                else
+                    extendTrade(t, math.max(bar_index + 2, t.lnEntry.get_x1() + lineLen))
 
     // 2) Watch the current pattern: pullback depth, break of A, expiry.
     if suOn and bar_index > suBorn
@@ -148,17 +195,26 @@ if barstate.isconfirmed
                 float stopPx = stopMode == S_ZERO ? su0 : suExt
                 if (e - stopPx) * suDir > 0
                     Trade t = Trade.new(suDir, e, stopPx, su0 + k1 * (suA - su0), su0 + k2 * (suA - su0), su0 + k3 * (suA - su0), su0 + k4 * (suA - su0))
-                    t.lbSl := label.new(bar_index + lineLen, stopPx, "وقف", style = label.style_label_left, color = color.new(slCol, 0), textcolor = color.white, size = size.small)
-                    t.lb1 := tpTag(t.tp1, "هدف 1")
-                    t.lb2 := tpTag(t.tp2, "هدف 2")
-                    t.lb3 := tpTag(t.tp3, "هدف 3")
-                    t.lb4 := tpTag(t.tp4, "هدف 4")
+                    int xr = bar_index + lineLen
+                    t.bxRisk := box.new(bar_index, math.max(e, stopPx), xr, math.min(e, stopPx), border_color = color.new(slCol, 100), bgcolor = color.new(slCol, 90))
+                    t.bxReward := box.new(bar_index, math.max(e, t.tp4), xr, math.min(e, t.tp4), border_color = color.new(hitCol, 100), bgcolor = color.new(hitCol, 92))
+                    t.lnEntry := line.new(bar_index, e, xr, e, color = color.new(entryCol, 20), width = 1)
+                    t.lnSl := line.new(bar_index, stopPx, xr, stopPx, color = color.new(slCol, 20), width = 1, style = line.style_dashed)
+                    t.ln1 := line.new(bar_index, t.tp1, xr, t.tp1, color = color.new(hitCol, 40), width = 1, style = line.style_dotted)
+                    t.ln2 := line.new(bar_index, t.tp2, xr, t.tp2, color = color.new(hitCol, 40), width = 1, style = line.style_dotted)
+                    t.ln3 := line.new(bar_index, t.tp3, xr, t.tp3, color = color.new(hitCol, 40), width = 1, style = line.style_dotted)
+                    t.ln4 := line.new(bar_index, t.tp4, xr, t.tp4, color = color.new(hitCol, 40), width = 1, style = line.style_dotted)
+                    t.lbSl := softTag(xr, stopPx, "SL " + fmt(stopPx), slCol)
+                    t.lbEntry := softTag(xr, e, "ENTRY " + fmt(e), entryCol)
+                    t.lb1 := softTag(xr, t.tp1, "TP1 " + fmt(t.tp1), hitCol)
+                    t.lb2 := softTag(xr, t.tp2, "TP2 " + fmt(t.tp2), hitCol)
+                    t.lb3 := softTag(xr, t.tp3, "TP3 " + fmt(t.tp3), hitCol)
+                    t.lb4 := softTag(xr, t.tp4, "TP4 " + fmt(t.tp4), hitCol)
                     trades.push(t)
                     evLong := suDir == 1
                     evShort := suDir == -1
                     color pc = suDir == 1 ? hitCol : slCol
-                    line.new(bar_index, e, bar_index + lineLen, e, color = entryCol, width = 2)
-                    label.new(bar_index + lineLen, e, "اختراق A", style = label.style_label_left, color = color.new(entryCol, 0), textcolor = color.white, size = size.small, tooltip = "Entry " + fmt(e))
+                    label.new(bar_index, suDir == 1 ? math.min(low, stopPx) : math.max(high, stopPx), suDir == 1 ? "BUY" : "SELL", style = suDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(pc, 25), textcolor = color.white, size = size.small, tooltip = "Entry " + fmt(e))
                     label.new(su0Bar, su0, "0", style = label.style_none, textcolor = pc, size = size.normal)
                     label.new(suABar, suA, "A", style = label.style_none, textcolor = pc, size = size.normal)
                     label.new(suExtBar, suExt, "B", style = label.style_none, textcolor = pc, size = size.normal)
@@ -217,4 +273,5 @@ if barstate.isconfirmed
 alertcondition(evLong, "APEX SK BUY", "APEX SK: break of A, long {{ticker}} {{interval}} @ {{close}}")
 alertcondition(evShort, "APEX SK SELL", "APEX SK: break of A, short {{ticker}} {{interval}} @ {{close}}")
 alertcondition(evTp, "APEX SK target hit", "APEX SK target hit {{ticker}} {{interval}}")
+alertcondition(evBe, "APEX SK breakeven exit", "APEX SK: remainder closed at the entry price {{ticker}} {{interval}}")
 alertcondition(evSl, "APEX SK stop hit", "APEX SK stop hit {{ticker}} {{interval}}")
