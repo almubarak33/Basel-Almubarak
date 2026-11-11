@@ -13,7 +13,8 @@
 //   Profit per trade, a quarter closed at each target, stop to entry after TP1:
 //    4H +0.09R / +0.05R,  1H +0.01R / +0.02R,  15m +0.02R / +0.03R,  5m -0.01R / -0.04R.
 //   TP1 is 0.27 of the risk, so about 79% winners is what a random entry gives; the edge measured is close to zero.
-// After TP1 the stop moves to the entry price (the rule used in the measurements above).
+// Optional: after TP1 the stop moves to the entry price (off by default: the trade then keeps running to the
+// later targets with its stop at point 0; measured results of the two variants are about the same).
 // No table.
 //@version=6
 indicator("APEX SK Patterns", shorttitle = "APEX SK", overlay = true, max_labels_count = 500, max_lines_count = 300, max_boxes_count = 100)
@@ -33,6 +34,7 @@ k4        = input.float(2.618, "TP4", minval = 1.04, step = 0.01)
 useAdx    = input.bool(true, "فلتر ADX · ADX filter")
 adxMin    = input.float(18, "ADX Min", minval = 1)
 stopMode  = input.string(S_ZERO, "الوقف · Stop", options = [S_ZERO, S_B])
+beAfterTp1 = input.bool(false, "نقل الوقف للدخول بعد الهدف الأول · Stop to entry after TP1", tooltip = "Off: the stop stays where it is and the trade runs on to TP2-TP4 (a trade can still be stopped after TP1). On: after TP1 the rest of the trade cannot lose, but it is closed when price comes back to the entry and misses later targets. Gold 15m, 16.8 years, a quarter closed at each target: off +0.03R / +0.03R per trade, on +0.02R / +0.03R.")
 expiryBars = input.int(100, "صلاحية النموذج بالشموع · Pattern expiry (bars)", minval = 5)
 showBox   = input.bool(true, "صندوق 0-A · 0-A box")
 lineLen   = input.int(10, "طول خط المستوى · Level line length", minval = 2, maxval = 100)
@@ -137,7 +139,7 @@ if barstate.isconfirmed
         for i = trades.size() - 1 to 0
             Trade t = trades.get(i)
             if t.dir == 1 ? low <= t.sl : high >= t.sl
-                if t.hits == 0
+                if t.sl != t.entry
                     t.lbSl.set_text("✗ SL " + fmt(t.sl))
                     t.lbSl.set_color(color.new(slCol, 0))
                     t.lbSl.set_textcolor(color.white)
@@ -153,15 +155,16 @@ if barstate.isconfirmed
                     t.hits := 1
                     markHit(t.lb1, t.ln1, 1, t.tp1)
                     evTp := true
-                    // stop to the entry price after TP1
-                    t.sl := t.entry
-                    t.lnSl.set_y1(t.entry)
-                    t.lnSl.set_y2(t.entry)
-                    t.lbSl.set_y(t.entry)
-                    t.lbSl.set_text("SL → BE")
-                    t.bxRisk.set_bgcolor(color.new(slCol, 100))
-                    t.lbEntry.set_text("")
-                    t.lbEntry.set_color(color.new(entryCol, 100))
+                    if beAfterTp1
+                        // stop to the entry price after TP1
+                        t.sl := t.entry
+                        t.lnSl.set_y1(t.entry)
+                        t.lnSl.set_y2(t.entry)
+                        t.lbSl.set_y(t.entry)
+                        t.lbSl.set_text("SL → BE")
+                        t.bxRisk.set_bgcolor(color.new(slCol, 100))
+                        t.lbEntry.set_text("")
+                        t.lbEntry.set_color(color.new(entryCol, 100))
                 if t.hits == 1 and (t.dir == 1 ? high >= t.tp2 : low <= t.tp2)
                     t.hits := 2
                     markHit(t.lb2, t.ln2, 2, t.tp2)
