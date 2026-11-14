@@ -1,0 +1,37 @@
+{
+  "id": "S1-first-pass-2026-11-14",
+  "purpose": "Cheap first-pass falsification of candidate strategy S1 (pre-New-York session range breakout) before any Expert Advisor is built. Every parameter, cost and verdict rule below is fixed before any result has been seen. This file is committed before the test script exists.",
+  "data": {
+    "source": "Binance USD-M XAUUSDT and XAGUSDT 1-minute klines from the public archive, used as a proxy for the spot/CFD mid price",
+    "period": "2026-02-01 to 2026-10-31",
+    "bars_removed": "Friday 22:00 UTC to Sunday 23:00 UTC (spot/CFD market closed)",
+    "known_limits": "proxy instrument, not the broker's own ticks; 1-minute resolution; nine months in one volatility regime"
+  },
+  "clock": "America/New_York, daylight-saving aware",
+  "rule": {
+    "days": "Monday to Friday",
+    "range_window": "[03:00, 08:00) New York, from 1-minute highs and lows; the day is void if fewer than 270 of the 300 one-minute bars exist",
+    "width_gate": "0.15 <= W / ATR14 <= 0.70, where W is the range width and ATR14 is the mean true range of the last 14 completed New-York-close daily sessions; and W >= 10 x spread",
+    "trigger": "the first 15-minute bar opening between 08:00 and 10:45 New York whose close is above range_high + 0.10 W (long) or below range_low - 0.10 W (short); one attempt per symbol per day",
+    "entry": "market order at the open of the first 1-minute bar after the trigger bar closes",
+    "stop": "range midpoint, server-side, never moved",
+    "target": "1.0 R (primary cell). Neighbours 1.5 R and 2.0 R are reported for robustness only and cannot be selected",
+    "time_exit": "market exit at 15:45 New York",
+    "news_filter": "none in this first pass (stated limitation)"
+  },
+  "costs": {
+    "XAU": { "spread": 0.30, "entry_slippage": 0.10, "stop_slippage": 0.10 },
+    "XAG": { "spread": 0.03, "entry_slippage": 0.01, "stop_slippage": 0.01 },
+    "note": "spread is paid in full on every round trip; target exits are limit fills with no slippage; time exits pay half a spread like any market exit"
+  },
+  "bar_resolution": "inside one 1-minute bar the stop is assumed to be hit before the target (pessimistic)",
+  "null_model": "same entry times, same stop distance (mirrored for the opposite side), same target and time exit, direction decided by a coin flip; 1000 seeds",
+  "verdict_rules_gold_primary_cell": {
+    "PASS": "trades >= 60 AND mean net R > 0 AND mean net R >= 95th percentile of the null AND long-only mean R >= -0.05 AND short-only mean R >= -0.05",
+    "INCONCLUSIVE": "trades < 60",
+    "FAIL": "anything else"
+  },
+  "meaning_of_verdict": "PASS only earns S1 the right to be built and tested properly in MetaTrader 5 on the broker's real ticks; it is not evidence of profitability. FAIL means S1 is not built first.",
+  "silver": "same parameters; reported as a robustness check only and does not change the verdict",
+  "trial_budget": "primary cell is trial 1 of at most 45 for the whole project; the two target neighbours are trials 2 and 3"
+}
