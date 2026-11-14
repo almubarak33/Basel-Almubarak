@@ -33,8 +33,10 @@ max_chase_frac = 0.25           # ignore it if price has moved more than a quart
 tp_field = "tp1"                # take-profit = target 1 (1R). The other targets are still journalled.
 max_hold_min = 0                # 0 = use the expiry time carried by the signal (24 bars)
 
+# APEX SK: its own source header reports an edge close to zero on 5-minute gold. Enabled for the demo trial only.
+# Its model entry is level A; this alert arrives after the bar closes, so far-away closes are skipped by max_chase_frac.
 [sources.APEXSK]
-enabled = false
+enabled = true
 max_age_sec = 20
 max_chase_frac = 0.25
 tp_field = "tp3"
