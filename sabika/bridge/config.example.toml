@@ -1,0 +1,41 @@
+# Sabika bridge settings. Copy to config.toml and edit. Risk settings here can be changed freely without touching code.
+# Strategy parameters live in the TradingView indicators: changing those is a new experiment that must be re-tested.
+
+[bridge]
+mode = "monitor"        # monitor = decide and journal, send NO orders | demo = trade a demo account | live = real account
+live_armed = false      # a real account is traded only when mode = "live" AND this is true
+magic = 20261114        # identifies this bridge's own positions; it never touches other trades
+db_path = "sabika_bridge.sqlite"
+heartbeat_timeout_sec = 420
+
+[ingress]
+host = "127.0.0.1"
+port = 8787
+secret = "CHANGE-ME-to-a-long-random-string"   # goes in the webhook URL path: https://<public-host>/tv/<secret>
+
+[risk]
+risk_pct = 0.5                  # % of equity lost if the stop is hit (hard ceiling 1.0)
+max_daily_loss_pct = 2.0        # flatten and stop for the day
+max_total_loss_pct = 10.0       # flatten and stop until an operator resets the lock
+max_open_positions = 2
+max_trades_per_day = 10
+max_notional_x_equity = 1.0     # position value may not exceed this multiple of equity
+max_spread_frac_of_stop = 0.12  # skip the trade if the spread is more than 12% of the stop distance
+max_lots = 1.0
+
+[symbols."CAPITALCOM:XAUUSD"]
+broker_symbol = "GOLD"          # the symbol name in MetaTrader 5 at this broker (XM uses GOLD)
+
+[sources.GOLDV2]
+enabled = true
+max_age_sec = 20                # ignore a signal that arrives later than this after its bar opened
+max_chase_frac = 0.25           # ignore it if price has moved more than a quarter of the risk from the model entry
+tp_field = "tp1"                # take-profit = target 1 (1R). The other targets are still journalled.
+max_hold_min = 0                # 0 = use the expiry time carried by the signal (24 bars)
+
+[sources.APEXSK]
+enabled = false
+max_age_sec = 20
+max_chase_frac = 0.25
+tp_field = "tp3"
+max_hold_min = 240
